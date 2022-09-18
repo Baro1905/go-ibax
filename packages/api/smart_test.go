@@ -431,13 +431,13 @@ type invalidPar struct {
 	Value string
 }
 
-func TestUpdatePlatformParam(t *testing.T) {
+func TestUpdateSysParam(t *testing.T) {
 	assert.NoError(t, keyLogin(1))
 
 	form := url.Values{"Name": {`max_columns`}, "Value": {`49`}}
-	assert.NoError(t, postTx(`UpdatePlatformParam`, &form))
+	assert.NoError(t, postTx(`UpdateSysParam`, &form))
 
-	var sysList paramsResult
+	var sysList ecosystemParamsResult
 	assert.NoError(t, sendGet(`systemparams?names=max_columns`, nil, &sysList))
 	assert.Len(t, sysList.List, 1)
 	assert.Equal(t, "49", sysList.List[0].Value)
@@ -447,12 +447,12 @@ func TestUpdatePlatformParam(t *testing.T) {
 		action { 
 			var costlen int
 			costlen = SysParamInt("price_exec_len") + 1
-			UpdatePlatformParam("Name,Value","max_columns","51")
-			DBUpdatePlatformParam("price_exec_len", Str(costlen), "true" )
+			UpdateSysParam("Name,Value","max_columns","51")
+			DBUpdateSysParam("price_exec_len", Str(costlen), "true" )
 			if SysParamInt("price_exec_len") != costlen {
 				error "Incorrect updated value"
 			}
-			DBUpdatePlatformParam("max_indexes", "4", "false" )
+			DBUpdateSysParam("max_indexes", "4", "false" )
 		}
 		}`}, "ApplicationId": {"1"},
 		"Conditions": {`ContractConditions("MainCondition")`}}
@@ -492,7 +492,7 @@ func TestUpdatePlatformParam(t *testing.T) {
 		{"honor_nodes", "[]"},
 	}
 	for _, item := range notvalid {
-		assert.Error(t, postTx(`UpdatePlatformParam`, &url.Values{`Name`: {item.Name}, `Value`: {item.Value}}))
+		assert.Error(t, postTx(`UpdateSysParam`, &url.Values{`Name`: {item.Name}, `Value`: {item.Value}}))
 		assert.NoError(t, sendGet(`systemparams?names=`+item.Name, nil, &sysList))
 		assert.Len(t, sysList.List, 1, `have got wrong parameter `+item.Name)
 
@@ -500,7 +500,7 @@ func TestUpdatePlatformParam(t *testing.T) {
 			continue
 		}
 
-		err = postTx(`UpdatePlatformParam`, &url.Values{`Name`: {item.Name}, `Value`: {sysList.List[0].Value}})
+		err = postTx(`UpdateSysParam`, &url.Values{`Name`: {item.Name}, `Value`: {sysList.List[0].Value}})
 		assert.NoError(t, err, item.Name, sysList.List[0].Value, sysList.List[0])
 	}
 }
@@ -515,7 +515,7 @@ func TestUpdateHonorNodesWithEmptyArray(t *testing.T) {
 		"Value": {string(byteNodes)},
 	}
 
-	require.NoError(t, postTx(`UpdatePlatformParam`, form))
+	require.NoError(t, postTx(`UpdateSysParam`, form))
 }
 
 /*

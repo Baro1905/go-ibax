@@ -124,7 +124,7 @@ open:
 	}), &gorm.Config{
 		AllowGlobalUpdate: true, //allow global update
 		//PrepareStmt:       true,
-		Logger: logger.Default.LogMode(logger.Silent), // start Logger, show detail log
+		Logger: logger.Default.LogMode(logger.Silent), // start Logger，show detail log
 	})
 	//DBConn, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
@@ -201,17 +201,11 @@ func GormClose() error {
 
 // DbTransaction is gorm.DB wrapper
 type DbTransaction struct {
-	conn      *gorm.DB
-	BinLogSql [][]byte
+	conn *gorm.DB
 }
 
 func NewDbTransaction(conn *gorm.DB) *DbTransaction {
 	return &DbTransaction{conn: conn}
-}
-
-func (d *DbTransaction) Debug() *DbTransaction {
-	d.conn = d.conn.Debug()
-	return d
 }
 
 // StartTransaction is beginning transaction
@@ -304,26 +298,12 @@ func (dbTx *DbTransaction) GetRecordsCountTx(tableName, where string) (count int
 
 // Update is updating table rows
 func (dbTx *DbTransaction) Update(tblname, set, where string) error {
-	sql := `UPDATE "` + strings.Trim(tblname, `"`) + `" SET ` + set + " " + where
-	return dbTx.ExecSql(sql)
-}
-
-// ExecSql is exec sql
-func (dbTx *DbTransaction) ExecSql(sql string) error {
-	queryFn := func(tx *gorm.DB) *gorm.DB {
-		return tx.Exec(sql)
-	}
-	err := queryFn(GetDB(dbTx)).Error
-	if err != nil {
-		return err
-	}
-	dbTx.BinLogSql = append(dbTx.BinLogSql, []byte(sql))
-	return nil
+	return GetDB(dbTx).Exec(`UPDATE "` + strings.Trim(tblname, `"`) + `" SET ` + set + " " + where).Error
 }
 
 // Delete is deleting table rows
 func (dbTx *DbTransaction) Delete(tblname, where string) error {
-	return dbTx.ExecSql(`DELETE FROM "` + tblname + `" ` + where)
+	return GetDB(dbTx).Exec(`DELETE FROM "` + tblname + `" ` + where).Error
 }
 
 // GetColumnCount is counting rows in table
@@ -342,12 +322,12 @@ func (dbTx *DbTransaction) GetColumnCount(tableName string) (int64, error) {
 
 // AlterTableAddColumn is adding column to table
 func (dbTx *DbTransaction) AlterTableAddColumn(tableName, columnName, columnType string) error {
-	return dbTx.ExecSql(`ALTER TABLE "` + tableName + `" ADD COLUMN "` + columnName + `" ` + columnType)
+	return GetDB(dbTx).Exec(`ALTER TABLE "` + tableName + `" ADD COLUMN "` + columnName + `" ` + columnType).Error
 }
 
 // AlterTableDropColumn is dropping column from table
 func (dbTx *DbTransaction) AlterTableDropColumn(tableName, columnName string) error {
-	return dbTx.ExecSql(`ALTER TABLE "` + tableName + `" DROP COLUMN "` + columnName + `"`)
+	return GetDB(dbTx).Exec(`ALTER TABLE "` + tableName + `" DROP COLUMN "` + columnName + `"`).Error
 }
 
 // CreateIndex is creating index on table column
@@ -364,7 +344,7 @@ func (dbTx *DbTransaction) GetColumnDataTypeCharMaxLength(tableName, columnName 
 
 // GetAllColumnTypes returns column types for table
 func (dbTx *DbTransaction) GetAllColumnTypes(tblname string) ([]map[string]string, error) {
-	return dbTx.GetAllTransaction(`SELECT column_name, data_type
+	return dbTx.GetAll(`SELECT column_name, data_type
 		FROM information_schema.columns
 		WHERE table_name = ?
 		ORDER BY ordinal_position ASC`, -1, tblname)
@@ -510,7 +490,7 @@ func (dbTx *DbTransaction) GetSumColumn(table, column, where string) (result str
 	return
 }
 
-// GetSumColumnCount returns the value of the column from the table by id
+//GetSumColumnCount returns the value of the column from the table by id
 func (dbTx *DbTransaction) GetSumColumnCount(table, column, where string) (result int, err error) {
 	err = GetDB(dbTx).Table(table).Select("count(*)").Where(where).Row().Scan(&result)
 	if err != nil {

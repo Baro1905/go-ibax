@@ -36,6 +36,7 @@ type DelayedTx struct {
 
 // RunForDelayBlockID creates the transactions that need to be run for blockID
 func (dtx *DelayedTx) RunForDelayBlockID(blockID int64) ([]*sqldb.Transaction, error) {
+
 	contracts, err := sqldb.GetAllDelayedContractsForBlockID(blockID)
 	if err != nil {
 		dtx.logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("getting delayed contracts for block")
@@ -43,9 +44,11 @@ func (dtx *DelayedTx) RunForDelayBlockID(blockID int64) ([]*sqldb.Transaction, e
 	}
 	txList := make([]*sqldb.Transaction, 0, len(contracts))
 	for _, c := range contracts {
-		tx, err := dtx.createDelayTxByItem(c.Contract, c.KeyID, c.HighRate)
+		params := make(map[string]interface{})
+		params["Id"] = c.ID
+		tx, err := dtx.createDelayTx(c.KeyID, c.HighRate, params)
 		if err != nil {
-			dtx.logger.WithError(err).Debug("can't create transaction for delayed contract")
+			dtx.logger.WithFields(log.Fields{"error": err}).Debug("can't create transaction for delayed contract")
 			return nil, err
 		}
 		txList = append(txList, tx)
@@ -54,19 +57,21 @@ func (dtx *DelayedTx) RunForDelayBlockID(blockID int64) ([]*sqldb.Transaction, e
 	return txList, nil
 }
 
-func (dtx *DelayedTx) createDelayTxByItem(name string, keyID, highRate int64) (*sqldb.Transaction, error) {
+func (dtx *DelayedTx) createDelayTx(keyID, highRate int64, params map[string]interface{}) (*sqldb.Transaction, error) {
 	vm := script.GetVM()
-	contract := smart.VMGetContract(vm, name, uint32(firstEcosystemID))
-	smartTx := types.SmartTransaction{
+	contract := smart.VMGetContract(vm, callDelayedContract, uint32(firstEcosystemID))
+	info := contract.Info()
+
+	smartTx := types.SmartContract{
 		Header: &types.Header{
-			ID:          int(contract.Info().ID),
+			ID:          int(info.ID),
+			Time:        dtx.time,
 			EcosystemID: firstEcosystemID,
 			KeyID:       keyID,
-			Time:        dtx.time,
 			NetworkID:   conf.Config.LocalConf.NetworkID,
 		},
 		SignedBy: smart.PubToID(dtx.publicKey),
-		Params:   map[string]any{},
+		Params:   params,
 	}
 
 	privateKey, err := hex.DecodeString(dtx.privateKey)
@@ -78,6 +83,5 @@ func (dtx *DelayedTx) createDelayTxByItem(name string, keyID, highRate int64) (*
 	if err != nil {
 		return nil, err
 	}
-
 	return transaction.CreateDelayTransactionHighRate(txData, txHash, keyID, highRate), nil
 }

@@ -27,8 +27,6 @@ const (
 	RequestTypeConfirmation
 	RequestTypeBlockCollection
 	RequestTypeMaxBlock
-	RequestTypeVoting
-	RequestSyncMatchineState
 
 	// BlocksPerRequest contains count of blocks per request
 	BlocksPerRequest int = 100
@@ -114,7 +112,7 @@ type GetBodyResponse struct {
 func (resp *GetBodyResponse) Read(r io.Reader) error {
 	slice, err := ReadSlice(r)
 	if err != nil {
-		log.WithError(err).Error("on reading GetBodyResponse")
+		log.WithFields(log.Fields{"error": err}).Error("on reading GetBodyResponse")
 		return err
 	}
 
@@ -173,7 +171,7 @@ type DisRequest struct {
 func (req *DisRequest) Read(r io.Reader) error {
 	slice, err := ReadSlice(r)
 	if err != nil {
-		log.WithError(err).Error("on reading disseminator request")
+		log.WithFields(log.Fields{"error": err}).Error("on reading disseminator request")
 		return err
 	}
 
@@ -184,7 +182,7 @@ func (req *DisRequest) Read(r io.Reader) error {
 func (req *DisRequest) Write(w io.Writer) error {
 	err := writeSlice(w, req.Data)
 	if err != nil {
-		log.WithError(err).Error("on sending disseminator request")
+		log.WithFields(log.Fields{"error": err}).Error("on sending disseminator request")
 	}
 
 	return err
@@ -385,88 +383,4 @@ func WriteInt(value int64, w io.Writer) error {
 	}
 
 	return nil
-}
-
-type CandidateNodeVotingRequest struct {
-	Data []byte
-}
-
-func (req *CandidateNodeVotingRequest) Read(r io.Reader) error {
-	slice, err := ReadSlice(r)
-	if err != nil {
-		log.WithError(err).Error("on reading disseminator request")
-		return err
-	}
-
-	req.Data = slice
-	return nil
-}
-
-func (req *CandidateNodeVotingRequest) Write(w io.Writer) error {
-	err := writeSlice(w, req.Data)
-	if err != nil {
-		log.WithError(err).Error("on sending disseminator request")
-	}
-
-	return err
-}
-
-type CandidateNodeVotingResponse struct {
-	Data []byte
-}
-
-func (resp *CandidateNodeVotingResponse) Read(r io.Reader) error {
-	slice, err := ReadSlice(r)
-	if err != nil {
-		log.WithError(err).Error("on reading CandidateNodeVotingResponse")
-		return err
-	}
-
-	resp.Data = slice
-	return nil
-}
-func (resp *CandidateNodeVotingResponse) Write(w io.Writer) error {
-	return writeSlice(w, resp.Data)
-}
-
-type BroadcastNodeConnInfoRequest struct {
-	Data []byte
-}
-
-func (req *BroadcastNodeConnInfoRequest) Read(r io.Reader) error {
-	slice, err := ReadSlice(r)
-	if err != nil {
-		log.WithError(err).Error("on reading disseminator request")
-		return err
-	}
-
-	req.Data = slice
-	return nil
-}
-
-func (req *BroadcastNodeConnInfoRequest) Write(w io.Writer) error {
-	err := writeSlice(w, req.Data)
-	if err != nil {
-		log.WithError(err).Error("on sending disseminator request")
-	}
-
-	return err
-}
-
-type BroadcastNodeConnInfoResponse struct {
-	Data []byte
-}
-
-func (resp *BroadcastNodeConnInfoResponse) Read(r io.Reader) error {
-	slice, err := ReadSlice(r)
-	if err != nil {
-		log.WithError(err).Error("on reading CandidateNodeVotingResponse")
-		return err
-	}
-
-	resp.Data = slice
-	return nil
-}
-func (resp *BroadcastNodeConnInfoResponse) Write(w io.Writer) error {
-	return writeSlice(w, resp.Data)
 }

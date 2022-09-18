@@ -52,14 +52,14 @@ func TestEvalIf(t *testing.T) {
 		{"$citizenId && 0", "false"},
 		{"0|| ($citizenId + $wallet_id == 950240)", "true"},
 	}
-	vars := map[string]any{
+	vars := map[string]interface{}{
 		`citizenId`: 56789,
 		`wallet_id`: 893451,
 	}
 	vm := NewVM()
-	vm.Extend(&ExtendData{map[string]any{"Multi": Multi}, nil, nil})
+	vm.Extend(&ExtendData{map[string]interface{}{"Multi": Multi}, nil, nil})
 	for _, item := range test {
-		out, err := vm.EvalIf(item.Input, 0, vars)
+		out, err := vm.EvalIf(item.Input, 0, &vars)
 		if err != nil {
 			if err.Error() != item.Output {
 				t.Error(`error of ifeval ` + item.Input + ` ` + err.Error())

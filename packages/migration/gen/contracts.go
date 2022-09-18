@@ -186,7 +186,7 @@ func generate(s scenario) error {
 		pkg = defaultPackageName
 	}
 
-	return contractsTemplate.Execute(file, map[string]any{
+	return contractsTemplate.Execute(file, map[string]interface{}{
 		"Package":   pkg,
 		"Variable":  s.Variable,
 		"Ecosystem": s.Ecosystem,

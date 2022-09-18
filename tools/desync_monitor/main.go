@@ -90,7 +90,7 @@ func main() {
 	flag.Parse()
 	conf := &config.Config{}
 	if err := conf.Read(*configPath); err != nil {
-		log.WithError(err).Fatal("reading config")
+		log.WithFields(log.Fields{"error": err}).Fatal("reading config")
 	}
 
 	flagsOverrideConfig(conf)

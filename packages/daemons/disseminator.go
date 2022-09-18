@@ -31,12 +31,8 @@ func Disseminator(ctx context.Context, d *daemon) error {
 	DBLock()
 	defer DBUnlock()
 
-	var (
-		isHonorNode = true
-		selectMode  = SelectModel{}
-	)
-	myNodePosition, err := selectMode.GetThisNodePosition()
-
+	isHonorNode := true
+	myNodePosition, err := syspar.GetThisNodePosition()
 	if err != nil {
 		d.logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Debug("finding node")
 		isHonorNode = false
@@ -66,18 +62,7 @@ func sendTransactions(ctx context.Context, logger *log.Entry) error {
 		return nil
 	}
 
-	hosts := make([]string, 0)
-	if syspar.IsHonorNodeMode() {
-		hosts = syspar.GetDefaultRemoteHosts()
-	} else {
-		candidateNodes, err := GetCandidateNodes()
-		if err != nil {
-			return err
-		}
-		for _, node := range candidateNodes {
-			hosts = append(hosts, node.TcpAddress)
-		}
-	}
+	hosts := syspar.GetDefaultRemoteHosts()
 
 	if err := tcpclient.SendTransacitionsToAll(ctx, hosts, *trs); err != nil {
 		log.WithFields(log.Fields{"type": consts.NetworkError, "error": err}).Error("on sending transactions")
@@ -117,24 +102,10 @@ func sendBlockWithTxHashes(ctx context.Context, honorNodeID int64, logger *log.E
 		logger.Debug("nothing to send")
 		return nil
 	}
-	selectModel := SelectModel{}.GetWorkMode()
-	_, ok := selectModel.(*HonorNodeMode)
-	var (
-		hosts          []string
-		banHosts       []string
-		candidateNodes sqldb.CandidateNodes
-	)
-	if ok {
-		hosts, banHosts, err = node.GetNodesBanService().FilterHosts(syspar.GetRemoteHosts())
-	} else {
-		candidateNodes, err = GetCandidateNodes()
-		for _, node := range candidateNodes {
-			hosts = append(hosts, node.TcpAddress)
-		}
-	}
 
+	hosts, banHosts, err := node.GetNodesBanService().FilterHosts(syspar.GetRemoteHosts())
 	if err != nil {
-		log.WithError(err).Error("on getting remotes hosts")
+		log.WithFields(log.Fields{"error": err}).Error("on getting remotes hosts")
 		return err
 	}
 	if len(banHosts) > 0 {

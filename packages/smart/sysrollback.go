@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/IBAX-io/go-ibax/packages/common/crypto"
 	"github.com/IBAX-io/go-ibax/packages/consts"
 	"github.com/IBAX-io/go-ibax/packages/converter"
 	"github.com/IBAX-io/go-ibax/packages/script"
 	"github.com/IBAX-io/go-ibax/packages/storage/sqldb"
-	"github.com/IBAX-io/go-ibax/packages/types"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -35,21 +33,25 @@ func SysRollback(sc *SmartContract, data SysRollData) error {
 	if err != nil {
 		return err
 	}
-	rollbackSys := &types.RollbackTx{
-		BlockId:   sc.BlockHeader.BlockId,
-		TxHash:    sc.Hash,
+	rollbackSys := &sqldb.RollbackTx{
+		BlockID:   sc.BlockData.BlockID,
+		TxHash:    sc.TxHash,
 		NameTable: SysName,
-		TableId:   converter.Int64ToStr(sc.TxSmart.EcosystemID),
+		TableID:   converter.Int64ToStr(sc.TxSmart.EcosystemID),
 		Data:      string(out),
-		DataHash:  crypto.Hash(out),
 	}
 	sc.RollBackTx = append(sc.RollBackTx, rollbackSys)
+	err = rollbackSys.Create(sc.DbTransaction)
+	if err != nil {
+		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("creating system  rollback")
+		return err
+	}
 	return nil
 }
 
 // SysRollbackTable is rolling back table
-func SysRollbackTable(dbTx *sqldb.DbTransaction, sysData SysRollData) error {
-	err := dbTx.DropTable(sysData.TableName)
+func SysRollbackTable(dbTransaction *sqldb.DbTransaction, sysData SysRollData) error {
+	err := dbTransaction.DropTable(sysData.TableName)
 	if err != nil {
 		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("dropping table")
 		return err
@@ -68,8 +70,8 @@ func SysRollbackView(DbTransaction *sqldb.DbTransaction, sysData SysRollData) er
 }
 
 // SysRollbackColumn is rolling back column
-func SysRollbackColumn(dbTx *sqldb.DbTransaction, sysData SysRollData) error {
-	return dbTx.AlterTableDropColumn(sysData.TableName, sysData.Data)
+func SysRollbackColumn(dbTransaction *sqldb.DbTransaction, sysData SysRollData) error {
+	return dbTransaction.AlterTableDropColumn(sysData.TableName, sysData.Data)
 }
 
 // SysRollbackContract performs rollback for the contract
@@ -103,7 +105,7 @@ func SysRollbackNewContract(sysData SysRollData, EcosystemID string) error {
 }
 
 // SysFlushContract is flushing contract
-func SysFlushContract(iroot any, id int64, active bool) error {
+func SysFlushContract(iroot interface{}, id int64, active bool) error {
 	root := iroot.(*script.CodeBlock)
 	if id != 0 {
 		if len(root.Children) != 1 || root.Children[0].Type != script.ObjectType_Contract {
@@ -112,8 +114,8 @@ func SysFlushContract(iroot any, id int64, active bool) error {
 	}
 	for i, item := range root.Children {
 		if item.Type == script.ObjectType_Contract {
-			root.Children[i].GetContractInfo().Owner.TableID = id
-			root.Children[i].GetContractInfo().Owner.Active = active
+			root.Children[i].Info.ContractInfo().Owner.TableID = id
+			root.Children[i].Info.ContractInfo().Owner.Active = active
 		}
 	}
 	script.VMFlushBlock(script.GetVM(), root)
@@ -124,9 +126,9 @@ func SysFlushContract(iroot any, id int64, active bool) error {
 func SysSetContractWallet(tblid, state int64, wallet int64) error {
 	for i, item := range script.GetVM().CodeBlock.Children {
 		if item != nil && item.Type == script.ObjectType_Contract {
-			cinfo := item.GetContractInfo()
+			cinfo := item.Info.ContractInfo()
 			if cinfo.Owner.TableID == tblid && cinfo.Owner.StateID == uint32(state) {
-				script.GetVM().Children[i].GetContractInfo().Owner.WalletID = wallet
+				script.GetVM().Children[i].Info.ContractInfo().Owner.WalletID = wallet
 			}
 		}
 	}
@@ -146,10 +148,10 @@ func SysRollbackEditContract(transaction *sqldb.DbTransaction, sysData SysRollDa
 		var owner *script.OwnerInfo
 		for i, item := range script.GetVM().CodeBlock.Children {
 			if item != nil && item.Type == script.ObjectType_Contract {
-				cinfo := item.GetContractInfo()
+				cinfo := item.Info.ContractInfo()
 				if cinfo.Owner.TableID == sysData.ID &&
 					cinfo.Owner.StateID == uint32(converter.StrToInt64(EcosystemID)) {
-					owner = script.GetVM().Children[i].GetContractInfo().Owner
+					owner = script.GetVM().Children[i].Info.ContractInfo().Owner
 					break
 				}
 			}
@@ -182,19 +184,19 @@ func SysRollbackEditContract(transaction *sqldb.DbTransaction, sysData SysRollDa
 }
 
 // SysRollbackEcosystem is rolling back ecosystem
-func SysRollbackEcosystem(dbTx *sqldb.DbTransaction, sysData SysRollData) error {
+func SysRollbackEcosystem(dbTransaction *sqldb.DbTransaction, sysData SysRollData) error {
 	tables := make([]string, 0)
 	for table := range converter.FirstEcosystemTables {
 		tables = append(tables, table)
-		err := dbTx.Delete(`1_`+table, fmt.Sprintf(`where ecosystem='%d'`, sysData.ID))
+		err := dbTransaction.Delete(`1_`+table, fmt.Sprintf(`where ecosystem='%d'`, sysData.ID))
 		if err != nil {
 			return err
 		}
 	}
 	if sysData.ID == 1 {
-		tables = append(tables, `node_ban_logs`, `bad_blocks`, `platform_parameters`, `ecosystems`)
+		tables = append(tables, `node_ban_logs`, `bad_blocks`, `system_parameters`, `ecosystems`)
 		for _, name := range tables {
-			err := dbTx.DropTable(fmt.Sprintf("%d_%s", sysData.ID, name))
+			err := dbTransaction.DropTable(fmt.Sprintf("%d_%s", sysData.ID, name))
 			if err != nil {
 				log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("dropping table")
 				return err
@@ -203,7 +205,7 @@ func SysRollbackEcosystem(dbTx *sqldb.DbTransaction, sysData SysRollData) error 
 	} else {
 		vm := script.GetVM()
 		for vm.Children[len(vm.Children)-1].Type == script.ObjectType_Contract {
-			cinfo := vm.Children[len(vm.Children)-1].GetContractInfo()
+			cinfo := vm.Children[len(vm.Children)-1].Info.ContractInfo()
 			if int64(cinfo.Owner.StateID) != sysData.ID {
 				break
 			}
@@ -228,7 +230,7 @@ func SysRollbackDeactivate(sysData SysRollData) error {
 }
 
 // SysRollbackDeleteColumn is rolling back delete column
-func SysRollbackDeleteColumn(dbTx *sqldb.DbTransaction, sysData SysRollData) error {
+func SysRollbackDeleteColumn(dbTransaction *sqldb.DbTransaction, sysData SysRollData) error {
 	var (
 		data map[string]string
 	)
@@ -240,7 +242,7 @@ func SysRollbackDeleteColumn(dbTx *sqldb.DbTransaction, sysData SysRollData) err
 	if err != nil {
 		return err
 	}
-	err = dbTx.AlterTableAddColumn(sysData.TableName, data["name"], sqlColType)
+	err = dbTransaction.AlterTableAddColumn(sysData.TableName, data["name"], sqlColType)
 	if err != nil {
 		return logErrorDB(err, "adding column to the table")
 	}
@@ -248,7 +250,7 @@ func SysRollbackDeleteColumn(dbTx *sqldb.DbTransaction, sysData SysRollData) err
 }
 
 // SysRollbackDeleteTable is rolling back delete table
-func SysRollbackDeleteTable(dbTx *sqldb.DbTransaction, sysData SysRollData) error {
+func SysRollbackDeleteTable(dbTransaction *sqldb.DbTransaction, sysData SysRollData) error {
 	var (
 		data    TableInfo
 		colsSQL string
@@ -260,14 +262,14 @@ func SysRollbackDeleteTable(dbTx *sqldb.DbTransaction, sysData SysRollData) erro
 	for key, item := range data.Columns {
 		colsSQL += `"` + key + `" ` + typeToPSQL[item] + " ,\n"
 	}
-	err = sqldb.CreateTable(dbTx, sysData.TableName, strings.TrimRight(colsSQL, ",\n"))
+	err = sqldb.CreateTable(dbTransaction, sysData.TableName, strings.TrimRight(colsSQL, ",\n"))
 	if err != nil {
 		return logErrorDB(err, "creating tables")
 	}
 
 	prefix, _ := PrefixName(sysData.TableName)
 	data.Table.SetTablePrefix(prefix)
-	err = data.Table.Create(dbTx)
+	err = data.Table.Create(dbTransaction)
 	if err != nil {
 		return logErrorDB(err, "insert table info")
 	}
