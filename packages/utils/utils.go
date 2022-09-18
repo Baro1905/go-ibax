@@ -60,12 +60,12 @@ func GetHTTPTextAnswer(url string) (string, error) {
 }
 
 // ErrInfoFmt fomats the error message
-func ErrInfoFmt(err string, a ...interface{}) error {
+func ErrInfoFmt(err string, a ...any) error {
 	return fmt.Errorf("%s (%s)", fmt.Sprintf(err, a...), Caller(1))
 }
 
 // ErrInfo formats the error message
-func ErrInfo(verr interface{}, additionally ...string) error {
+func ErrInfo(verr any, additionally ...string) error {
 	var err error
 	switch verr.(type) {
 	case error:
@@ -83,7 +83,7 @@ func ErrInfo(verr interface{}, additionally ...string) error {
 }
 
 // CallMethod calls the function by its name
-func CallMethod(i interface{}, methodName string) interface{} {
+func CallMethod(i any, methodName string) any {
 	var ptr reflect.Value
 	var value reflect.Value
 	var finalMethod reflect.Value
@@ -192,10 +192,9 @@ func CheckSign(publicKeys [][]byte, forSign []byte, signs []byte, nodeKeyOrLogin
 			log.WithFields(log.Fields{"type": consts.UnmarshallingError, "error": err}).Error("decoding signs length")
 			return false, err
 		}
-		if length == 0 {
-			return false, ErrInfoFmt("DecodeLength len(signs) == 0")
+		if length > 0 {
+			signsSlice = append(signsSlice, converter.BytesShift(&signs, length))
 		}
-		signsSlice = append(signsSlice, converter.BytesShift(&signs, length))
 
 		if len(publicKeys) != len(signsSlice) {
 			log.WithFields(log.Fields{"public_keys_length": len(publicKeys), "signs_length": len(signsSlice), "type": consts.SizeDoesNotMatch}).Error("public keys and signs slices lengths does not match")
@@ -203,42 +202,7 @@ func CheckSign(publicKeys [][]byte, forSign []byte, signs []byte, nodeKeyOrLogin
 		}
 	}
 
-	return crypto.CheckSign(publicKeys[0], forSign, signsSlice[0])
-}
-
-// MerkleTreeRoot rertun Merkle value
-func MerkleTreeRoot(dataArray [][]byte) ([]byte, error) {
-	result := make(map[int32][][]byte)
-	for _, v := range dataArray {
-		hash := converter.BinToHex(crypto.DoubleHash(v))
-		result[0] = append(result[0], hash)
-	}
-	var j int32
-	for len(result[j]) > 1 {
-		for i := 0; i < len(result[j]); i = i + 2 {
-			if len(result[j]) <= (i + 1) {
-				if _, ok := result[j+1]; !ok {
-					result[j+1] = [][]byte{result[j][i]}
-				} else {
-					result[j+1] = append(result[j+1], result[j][i])
-				}
-			} else {
-				if _, ok := result[j+1]; !ok {
-					hash := crypto.DoubleHash(append(result[j][i], result[j][i+1]...))
-					hash = converter.BinToHex(hash)
-					result[j+1] = [][]byte{hash}
-				} else {
-					hash := crypto.DoubleHash([]byte(append(result[j][i], result[j][i+1]...)))
-					hash = converter.BinToHex(hash)
-					result[j+1] = append(result[j+1], hash)
-				}
-			}
-		}
-		j++
-	}
-
-	ret := result[int32(len(result)-1)]
-	return []byte(ret[0]), nil
+	return crypto.Verify(publicKeys[0], forSign, signsSlice[0])
 }
 
 // GetCurrentDir returns the current directory

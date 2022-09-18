@@ -32,7 +32,6 @@ import (
 	"github.com/IBAX-io/go-ibax/packages/storage/sqldb"
 	"github.com/IBAX-io/go-ibax/packages/utils"
 	log "github.com/sirupsen/logrus"
-	lSyslog "github.com/sirupsen/logrus/hooks/syslog"
 )
 
 // Start starts the main code of the program
@@ -94,8 +93,14 @@ func Start() {
 
 	if sqldb.DBConn != nil {
 		if err := sqldb.UpdateSchema(); err != nil {
-			log.WithFields(log.Fields{"error": err}).Error("on running update migrations")
+			log.WithError(err).Error("on running update migrations")
 			exitErr(1)
+		}
+		candidateNodes, err := sqldb.GetCandidateNode(syspar.SysInt(syspar.NumberNodes))
+		if err == nil && len(candidateNodes) > 0 {
+			syspar.SetRunModel(consts.CandidateNodeMode)
+		} else {
+			syspar.SetRunModel(consts.HonorNodeMode)
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -103,7 +108,7 @@ func Start() {
 		utils.ReturnCh = make(chan string)
 
 		// The installation process is already finished (where user has specified DB and where wallet has been restarted)
-		err := daemonsctl.RunAllDaemons(ctx)
+		err = daemonsctl.RunAllDaemons(ctx)
 		log.Info("Daemons started")
 		if err != nil {
 			exitErr(1)
@@ -136,7 +141,7 @@ func initLogs() error {
 	case "syslog":
 		facility := conf.Config.Log.Syslog.Facility
 		tag := conf.Config.Log.Syslog.Tag
-		sysLogHook, err := lSyslog.NewSyslogHook("", "", logtools.SyslogFacilityPriority[facility], tag)
+		sysLogHook, err := logtools.NewSyslogHook(facility, tag)
 		if err != nil {
 			log.WithError(err).Error("Unable to connect to local syslog daemon")
 		} else {

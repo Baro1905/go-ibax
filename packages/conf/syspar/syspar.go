@@ -73,7 +73,7 @@ const (
 	TaxesSize = `taxes_size`
 	// PriceTxSize is the size of a user's resource in the database
 	PriceTxSize = `price_tx_size`
-	// PriceCreateRate is new element rate, include table、contract、column、ecosystem、page、menu
+	// PriceCreateRate is new element rate, include table,contract,column,ecosystem,page,menu
 	PriceCreateRate = `price_create_rate`
 	// Test equals true or 1 if we have a test blockchain
 	Test = `test`
@@ -85,22 +85,25 @@ const (
 
 	PriceExec       = "price_exec_"
 	AccessExec      = "access_exec_"
+	PriceCreateExec = "price_create_exec_"
 	PayFreeContract = "pay_free_contract"
 )
 
 var (
-	cache             = map[string]string{}
-	nodes             = make(map[string]*HonorNode)
-	nodesByPosition   = make([]*HonorNode, 0)
-	fuels             = make(map[int64]string)
-	wallets           = make(map[int64]string)
-	mutex             = &sync.RWMutex{}
-	firstBlockData    *types.FirstBlock
-	errFirstBlockData = errors.New("failed to get data of the first block")
-	errNodeDisabled   = errors.New("node is disabled")
-	nodePubKey        []byte
-	nodePrivKey       []byte
-	cacheTableColType = make([]map[string]string, 0)
+	cache               = map[string]string{}
+	nodes               = make(map[string]*HonorNode)
+	nodesByPosition     = make([]*HonorNode, 0)
+	fuels               = make(map[int64]string)
+	wallets             = make(map[int64]string)
+	mutex               = &sync.RWMutex{}
+	firstBlockData      *types.FirstBlock
+	firstBlockTimestamp int64
+	errFirstBlockData   = errors.New("failed to get data of the first block")
+	errNodeDisabled     = errors.New("node is disabled")
+	nodePubKey          []byte
+	nodePrivKey         []byte
+	cacheTableColType   = make([]map[string]string, 0)
+	runModel            uint8
 )
 
 func ReadNodeKeys() (err error) {
@@ -125,6 +128,14 @@ func ReadNodeKeys() (err error) {
 	return
 }
 
+func GetSysParCache() map[string]string {
+	var cp = make(map[string]string, len(cache))
+	for k, v := range cache {
+		cp[k] = v
+	}
+	return cp
+}
+
 func GetNodePubKey() []byte {
 	return nodePubKey
 }
@@ -133,17 +144,17 @@ func GetNodePrivKey() []byte {
 	return nodePrivKey
 }
 
-// SysUpdate reloads/updates values of system parameters
-func SysUpdate(dbTransaction *sqldb.DbTransaction) error {
+// SysUpdate reloads/updates values of platform parameters
+func SysUpdate(dbTx *sqldb.DbTransaction) error {
 	var err error
-	systemParameters, err := sqldb.GetAllSystemParameters(dbTransaction)
+	platformParameters, err := sqldb.GetAllPlatformParameters(dbTx)
 	if err != nil {
-		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("getting all system parameters")
+		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("getting all platform parameters")
 		return err
 	}
 	mutex.Lock()
 	defer mutex.Unlock()
-	for _, param := range systemParameters {
+	for _, param := range platformParameters {
 		cache[param.Name] = param.Value
 	}
 	if len(cache[HonorNodes]) > 0 {
@@ -269,9 +280,30 @@ func GetNumberOfNodes() int64 {
 }
 
 func GetNumberOfNodesFromDB(transaction *sqldb.DbTransaction) int64 {
-	sp := &sqldb.SystemParameter{}
+	var bk sqldb.BlockChain
+	f, err := bk.GetMaxBlock()
+	if err != nil || !f {
+		return 1
+	}
+	if bk.ConsensusMode == consts.CandidateNodeMode {
+		var candidate sqldb.CandidateNode
+		var total int64
+		pledgeAmount, err := sqldb.GetPledgeAmount()
+		if err != nil {
+			return 1
+		}
+		err = sqldb.GetDB(transaction).Table(candidate.TableName()).Where("deleted = 0 AND earnest_total >= ?", pledgeAmount).Limit(SysInt(NumberNodes)).Count(&total).Error
+		if err != nil {
+			return 1
+		}
+		if total < 1 {
+			total = 1
+		}
+		return total
+	}
+	sp := &sqldb.PlatformParameter{}
 	sp.GetTransaction(transaction, HonorNodes)
-	var honorNodes []map[string]interface{}
+	var honorNodes []map[string]any
 	if len(sp.Value) > 0 {
 		if err := json.Unmarshal([]byte(sp.Value), &honorNodes); err != nil {
 			log.WithFields(log.Fields{"type": consts.JSONUnmarshallError, "error": err, "value": sp.Value}).Error("unmarshalling honor nodes from JSON")
@@ -309,6 +341,21 @@ func GetNodeByHost(host string) (HonorNode, error) {
 func GetNodeHostByPosition(position int64) (string, error) {
 	mutex.RLock()
 	defer mutex.RUnlock()
+	if IsCandidateNodeMode() {
+		candidateNode := &sqldb.CandidateNode{}
+		err := candidateNode.GetCandidateNodeById(position)
+		if err != nil {
+			return "", err
+		}
+		nodePublicKey, err := hex.DecodeString(candidateNode.NodePubKey)
+		if err != nil {
+			return "", err
+		}
+		nodePublicKey = crypto.CutPub(nodePublicKey)
+
+		return candidateNode.TcpAddress, nil
+	}
+
 	nodeData, err := GetNodeByPosition(position)
 	if err != nil {
 		return "", err
@@ -320,6 +367,20 @@ func GetNodeHostByPosition(position int64) (string, error) {
 func GetNodePublicKeyByPosition(position int64) ([]byte, error) {
 	mutex.RLock()
 	defer mutex.RUnlock()
+	if IsCandidateNodeMode() {
+		candidateNode := &sqldb.CandidateNode{}
+		err := candidateNode.GetCandidateNodeById(position)
+		if err != nil {
+			return nil, err
+		}
+		nodePublicKey, err := hex.DecodeString(candidateNode.NodePubKey)
+		if err != nil {
+			return nil, err
+		}
+		nodePublicKey = crypto.CutPub(nodePublicKey)
+
+		return nodePublicKey, nil
+	}
 	if int64(len(nodesByPosition)) <= position {
 		return nil, fmt.Errorf("incorrect position")
 	}
@@ -353,7 +414,7 @@ func GetFuelRate(ecosystem int64) string {
 	if ret, ok := fuels[ecosystem]; ok {
 		return ret
 	}
-	return fuels[1]
+	return ``
 }
 
 // HasFuelRate is returns fuels exist
@@ -373,7 +434,7 @@ func GetTaxesWallet(ecosystem int64) string {
 	if ret, ok := wallets[ecosystem]; ok {
 		return ret
 	}
-	return wallets[1]
+	return ``
 }
 
 // HasTaxesWallet is returns taxes exist
@@ -406,6 +467,16 @@ func GetMaxBlockGenerationTime() int64 {
 	return converter.StrToInt64(SysString(MaxBlockGenerationTime))
 }
 
+// GetGapsBetweenBlocks is returns gaps between blocks
+func GetGapsBetweenBlocks() int64 {
+	return converter.StrToInt64(SysString(GapsBetweenBlocks))
+}
+
+// GetMaxBlockTimeDuration return max block time duration
+func GetMaxBlockTimeDuration() time.Duration {
+	return time.Millisecond*time.Duration(GetMaxBlockGenerationTime()) + time.Second*time.Duration(GetGapsBetweenBlocks())
+}
+
 // GetMaxTxSize is returns max tx size
 func GetMaxTxSize() int64 {
 	return converter.StrToInt64(SysString(MaxTxSize))
@@ -414,11 +485,6 @@ func GetMaxTxSize() int64 {
 // GetMaxTxTextSize is returns max tx text size
 func GetMaxForsignSize() int64 {
 	return converter.StrToInt64(SysString(MaxForsignSize))
-}
-
-// GetGapsBetweenBlocks is returns gaps between blocks
-func GetGapsBetweenBlocks() int64 {
-	return converter.StrToInt64(SysString(GapsBetweenBlocks))
 }
 
 // GetMaxTxCount is returns max tx count
@@ -513,6 +579,12 @@ func HasSys(name string) bool {
 	return ok
 }
 
+func SetFirstBlockTimestamp(data int64) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	firstBlockTimestamp = data
+}
+
 // SetFirstBlockData sets data of first block to global variable
 func SetFirstBlockData(data *types.FirstBlock) {
 	mutex.Lock()
@@ -529,6 +601,13 @@ func SetFirstBlockData(data *types.FirstBlock) {
 			Stopped:   false,
 		}}
 	}
+}
+
+func GetFirstBlockTimestamp() int64 {
+	mutex.RLock()
+	defer mutex.RUnlock()
+
+	return firstBlockTimestamp
 }
 
 // GetFirstBlockData gets data of first block from global variable
@@ -569,12 +648,20 @@ func GetPriceExec(s string) (price int64, ok bool) {
 	return
 }
 
+func GetPriceCreateExec(s string) (price int64, ok bool) {
+	if ok = HasSys(PriceCreateExec + s); !ok {
+		return
+	}
+	price = SysInt64(PriceCreateExec + s)
+	return
+}
+
 // SysTableColType reloads/updates values of all ecosystem table column data type
-func SysTableColType(dbTransaction *sqldb.DbTransaction) error {
+func SysTableColType(dbTx *sqldb.DbTransaction) error {
 	var err error
 	mutex.RLock()
 	defer mutex.RUnlock()
-	cacheTableColType, err = dbTransaction.GetAllTransaction(`
+	cacheTableColType, err = dbTx.GetAllTransaction(`
 		SELECT table_name,column_name,data_type,character_maximum_length
 		FROM information_schema.columns Where table_schema NOT IN ('pg_catalog', 'information_schema') AND table_name ~ '[\d]' AND data_type = 'bytea' ORDER BY ordinal_position ASC;`, -1)
 	if err != nil {
@@ -596,4 +683,16 @@ func IsByteColumn(table, column string) bool {
 		}
 	}
 	return false
+}
+
+func SetRunModel(setVal uint8) {
+	runModel = setVal
+}
+
+func IsHonorNodeMode() bool {
+	return runModel == consts.HonorNodeMode
+}
+
+func IsCandidateNodeMode() bool {
+	return runModel == consts.CandidateNodeMode
 }

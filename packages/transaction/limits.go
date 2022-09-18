@@ -6,17 +6,14 @@
 package transaction
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
-	"github.com/IBAX-io/go-ibax/packages/types"
+	"github.com/pkg/errors"
 
 	"github.com/IBAX-io/go-ibax/packages/conf/syspar"
 	"github.com/IBAX-io/go-ibax/packages/consts"
-	"github.com/IBAX-io/go-ibax/packages/converter"
 	"github.com/IBAX-io/go-ibax/packages/script"
-	"github.com/IBAX-io/go-ibax/packages/storage/sqldb"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -49,7 +46,7 @@ type Limits struct {
 // Limiter describes interface functions for limits
 type Limiter interface {
 	init()
-	check(*Transaction, LimitMode) error
+	check(TransactionCaller, LimitMode) error
 }
 
 type limiterModes struct {
@@ -62,8 +59,6 @@ var (
 	ErrLimitSkip = errors.New(`skip tx`)
 	// ErrLimitStop returns when the generation of the block should be stopped
 	ErrLimitStop = errors.New(`stop generating block`)
-	// ErrLimitTime returns when the time limit exceeded
-	ErrLimitTime = errors.New(`time limit exceeded`)
 )
 
 // NewLimits initializes Limits structure.
@@ -73,12 +68,12 @@ func NewLimits(b LimitMode) (limits *Limits) {
 	limits.Mode = b
 
 	allLimiters := []limiterModes{
-		{&txMaxSize{}, letPreprocess | letParsing},
-		{&txUserLimit{}, letPreprocess | letParsing},
-		{&txMaxLimit{}, letPreprocess | letParsing},
-		{&txUserEcosysLimit{}, letPreprocess | letParsing},
-		{&timeBlockLimit{}, letGenBlock},
-		{&txMaxFuel{}, letGenBlock | letParsing},
+		{limiter: &txMaxSize{}, modes: letPreprocess | letParsing},
+		{limiter: &txUserLimit{}, modes: letPreprocess | letParsing},
+		{limiter: &txMaxLimit{}, modes: letPreprocess | letParsing},
+		{limiter: &txUserEcosysLimit{}, modes: letPreprocess | letParsing},
+		{limiter: &timeBlockLimit{}, modes: letGenBlock},
+		{limiter: &txMaxFuel{}, modes: letGenBlock | letParsing},
 	}
 	for _, limiter := range allLimiters {
 		if limiter.modes&limits.Mode == 0 {
@@ -91,7 +86,7 @@ func NewLimits(b LimitMode) (limits *Limits) {
 }
 
 // CheckLimit calls each limiter
-func (limits *Limits) CheckLimit(t *Transaction) error {
+func (limits *Limits) CheckLimit(t TransactionCaller) error {
 	for _, limiter := range limits.Limiters {
 		if err := limiter.check(t, limits.Mode); err != nil {
 			return err
@@ -100,7 +95,7 @@ func (limits *Limits) CheckLimit(t *Transaction) error {
 	return nil
 }
 
-func limitError(limitName, msg string, args ...interface{}) error {
+func limitError(limitName, msg string, args ...any) error {
 	err := fmt.Errorf(msg, args...)
 	log.WithFields(log.Fields{"type": consts.BlockError, "error": err}).Error(limitName)
 	return script.SetVMError(`panic`, err)
@@ -116,10 +111,10 @@ func (bl *txMaxLimit) init() {
 	bl.Limit = syspar.GetMaxTxCount()
 }
 
-func (bl *txMaxLimit) check(t *Transaction, mode LimitMode) error {
+func (bl *txMaxLimit) check(t TransactionCaller, mode LimitMode) error {
 	bl.Count++
 	if bl.Count+1 > bl.Limit && mode == letPreprocess {
-		return ErrLimitStop
+		return errors.WithMessage(ErrLimitStop, "txMaxLimit")
 	}
 	if bl.Count > bl.Limit {
 		return limitError(`txMaxLimit`, `Max tx in the block`)
@@ -138,13 +133,13 @@ func (bl *timeBlockLimit) init() {
 	bl.Limit = time.Millisecond * time.Duration(syspar.GetMaxBlockGenerationTime())
 }
 
-func (bl *timeBlockLimit) check(t *Transaction, mode LimitMode) error {
+func (bl *timeBlockLimit) check(t TransactionCaller, mode LimitMode) error {
 	if time.Since(bl.Start) < bl.Limit {
 		return nil
 	}
 
 	if mode == letGenBlock {
-		return ErrLimitStop
+		return errors.WithMessage(ErrLimitStop, "timeBlockLimit")
 	}
 
 	return limitError("txBlockTimeLimit", "Block generation time exceeded")
@@ -161,12 +156,12 @@ func (bl *txUserLimit) init() {
 	bl.Limit = syspar.GetMaxBlockUserTx()
 }
 
-func (bl *txUserLimit) check(t *Transaction, mode LimitMode) error {
+func (bl *txUserLimit) check(t TransactionCaller, mode LimitMode) error {
 	var (
 		count int
 		ok    bool
 	)
-	keyID := t.TxKeyID()
+	keyID := t.txKeyID()
 	if count, ok = bl.TxUsers[keyID]; ok {
 		if count+1 > bl.Limit && mode == letPreprocess {
 			return ErrLimitSkip
@@ -193,12 +188,13 @@ func (bl *txUserEcosysLimit) init() {
 	bl.TxEcosys = make(map[int64]ecosysLimit)
 }
 
-func (bl *txUserEcosysLimit) check(t *Transaction, mode LimitMode) error {
-	keyID := t.TxKeyID()
-	if t.TxType() == types.SmartContractTxType {
+func (bl *txUserEcosysLimit) check(t TransactionCaller, mode LimitMode) error {
+	keyID := t.txKeyID()
+	smart, ok := t.(*SmartTransactionParser)
+	if !ok {
 		return nil
 	}
-	ecosystemID := t.Inner.(*SmartContractTransaction).TxSmart.EcosystemID
+	ecosystemID := smart.TxSmart.EcosystemID
 	if val, ok := bl.TxEcosys[ecosystemID]; ok {
 		if user, ok := val.TxUsers[keyID]; ok {
 			if user+1 > val.Limit && mode == letPreprocess {
@@ -214,15 +210,6 @@ func (bl *txUserEcosysLimit) check(t *Transaction, mode LimitMode) error {
 		}
 	} else {
 		limit := syspar.GetMaxBlockUserTx()
-		sp := &sqldb.StateParameter{}
-		sp.SetTablePrefix(converter.Int64ToStr(ecosystemID))
-		found, err := sp.Get(t.DbTransaction, `max_tx_block_per_user`)
-		if err != nil {
-			return limitError(`txUserEcosysLimit`, err.Error())
-		}
-		if found {
-			limit = converter.StrToInt(sp.Value)
-		}
 		bl.TxEcosys[ecosystemID] = ecosysLimit{TxUsers: make(map[int64]int), Limit: limit}
 		bl.TxEcosys[ecosystemID].TxUsers[keyID] = 1
 	}
@@ -241,15 +228,15 @@ func (bl *txMaxSize) init() {
 	bl.LimitTx = syspar.GetMaxTxSize()
 }
 
-func (bl *txMaxSize) check(t *Transaction, mode LimitMode) error {
-	size := int64(len(t.FullData))
+func (bl *txMaxSize) check(t TransactionCaller, mode LimitMode) error {
+	size := int64(len(append([]byte{t.txType()}, t.txPayload()...)))
 	if size > bl.LimitTx {
 		return limitError(`txMaxSize`, `Max size of tx`)
 	}
 	bl.Size += size
 	if bl.Size > bl.LimitBlock {
 		if mode == letPreprocess {
-			return ErrLimitStop
+			return errors.WithMessage(ErrLimitStop, "txMaxSize")
 		}
 		return limitError(`txMaxSize`, `Max size of the block`)
 	}
@@ -268,18 +255,19 @@ func (bl *txMaxFuel) init() {
 	bl.LimitTx = syspar.GetMaxTxFuel()
 }
 
-func (bl *txMaxFuel) check(t *Transaction, mode LimitMode) error {
-	if t.TxType() == types.SmartContractTxType {
+func (bl *txMaxFuel) check(t TransactionCaller, mode LimitMode) error {
+	smart, ok := t.(*SmartTransactionParser)
+	if !ok {
 		return nil
 	}
-	fuel := t.Inner.(*SmartContractTransaction).TxFuel
+	fuel := smart.TxFuel
 	if fuel > bl.LimitTx {
 		return limitError(`txMaxFuel`, `Max fuel of tx %d > %d`, fuel, bl.LimitTx)
 	}
 	bl.Fuel += fuel
 	if bl.Fuel > bl.LimitBlock {
 		if mode == letGenBlock {
-			return ErrLimitStop
+			return errors.WithMessage(ErrLimitStop, "txMaxFuel")
 		}
 		return limitError(`txMaxFuel`, `Max fuel of the block`)
 	}
