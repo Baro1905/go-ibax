@@ -27,15 +27,14 @@ var tablesDataSQL = `INSERT INTO "1_tables" ("id", "name", "permissions","column
     (next_id('1_tables'), 'keys',
         '{
             "insert": "true",
-            "update": "ContractAccess(\"@1TokensTransfer\",\"@1TokensLockoutMember\",\"@1NewToken\",\"@1TeBurn\",\"@1TokensDecDeposit\",\"@1TokensIncDeposit\",\"@1ProfileEdit\",\"@1NewUser\")",
+            "update": "ContractAccess(\"@1TokensTransfer\",\"@1TokensLockoutMember\",\"@1NewToken\",\"@1TeBurn\",\"@1ProfileEdit\",\"@1NewUser\")",
             "new_column": "ContractConditions(\"@1MainCondition\")"
         }',
         '{
             "pub": "ContractAccess(\"@1NewUser\")",
             "amount": "ContractAccess(\"@1TokensTransfer\",\"@1NewToken\",\"@1TeBurn\",\"@1ProfileEdit\")",
             "maxpay": "ContractConditions(\"@1MainCondition\")",
-            "deposit": "ContractAccess(\"@1TokensDecDeposit\",\"@1TokensIncDeposit\")",
-            "deleted": "ContractConditions(\"@1MainCondition\")",
+            "deleted": "ContractAccess(\"@1DeleteMember\")",
             "blocked": "ContractAccess(\"@1TokensLockoutMember\")",
             "account": "false",
             "ecosystem": "false",
@@ -45,7 +44,7 @@ var tablesDataSQL = `INSERT INTO "1_tables" ("id", "name", "permissions","column
     ),
     (next_id('1_tables'), 'history',
         '{
-            "insert": "ContractAccess(\"@1TokensTransfer\",\"@1NewUser\",\"@1NewToken\",\"@1TeBurn\",\"@1ProfileEdit\")",
+            "insert": "ContractAccess(\"@1TokensTransfer\",\"@1NewUser\",\"@1NewToken\",\"@1TeBurn\",\"@1ProfileEdit\",\"@1MembershipRequest\",\"@1MembershipDecide\",\"@1MembershipAdd\",\"@1DeleteMember\")",
             "update": "ContractConditions(\"@1MainCondition\")",
             "new_column": "ContractConditions(\"@1MainCondition\")"
         }',
@@ -57,6 +56,7 @@ var tablesDataSQL = `INSERT INTO "1_tables" ("id", "name", "permissions","column
             "amount":  "false",
             "value_detail":  "false",
             "comment": "false",
+            "status": "false",
             "block_id":  "false",
             "txhash": "false",
             "ecosystem": "false",

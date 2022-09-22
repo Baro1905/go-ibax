@@ -86,7 +86,7 @@ func sendRawRequest(rtype, url string, form *url.Values) ([]byte, error) {
 	return data, nil
 }
 
-func sendRequest(rtype, url string, form *url.Values, v interface{}) error {
+func sendRequest(rtype, url string, form *url.Values, v any) error {
 	data, err := sendRawRequest(rtype, url, form)
 	if err != nil {
 		return err
@@ -95,11 +95,11 @@ func sendRequest(rtype, url string, form *url.Values, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
 
-func sendGet(url string, form *url.Values, v interface{}) error {
+func sendGet(url string, form *url.Values, v any) error {
 	return sendRequest("GET", url, form, v)
 }
 
-func sendPost(url string, form *url.Values, v interface{}) error {
+func sendPost(url string, form *url.Values, v any) error {
 	return sendRequest("POST", url, form, v)
 }
 
@@ -317,7 +317,7 @@ type getter interface {
 	Get(string) string
 }
 
-type contractParams map[string]interface{}
+type contractParams map[string]any
 
 func (cp *contractParams) Get(key string) string {
 	if _, ok := (*cp)[key]; !ok {
@@ -326,7 +326,7 @@ func (cp *contractParams) Get(key string) string {
 	return fmt.Sprintf("%v", (*cp)[key])
 }
 
-func (cp *contractParams) GetRaw(key string) interface{} {
+func (cp *contractParams) GetRaw(key string) any {
 	return (*cp)[key]
 }
 
@@ -336,7 +336,7 @@ func postTxResult(name string, form getter) (id int64, msg string, err error) {
 		return
 	}
 
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 	for _, field := range contract.Fields {
 		name := field.Name
 		value := form.Get(name)
@@ -353,11 +353,11 @@ func postTxResult(name string, form getter) (id int64, msg string, err error) {
 		case "float":
 			params[name], err = strconv.ParseFloat(value, 64)
 		case "array":
-			var v interface{}
+			var v any
 			err = json.Unmarshal([]byte(value), &v)
 			params[name] = v
 		case "map":
-			var v map[string]interface{}
+			var v map[string]any
 			err = json.Unmarshal([]byte(value), &v)
 			params[name] = v
 		case "string", "money":
@@ -384,11 +384,11 @@ func postTxResult(name string, form getter) (id int64, msg string, err error) {
 		return
 	}
 
-	data, hash, err := transaction.NewTransaction(types.SmartContract{
+	data, hash, err := transaction.NewTransactionInProc(types.SmartTransaction{
 		Header: &types.Header{
 			ID:          int(contract.ID),
-			Time:        time.Now().Unix(),
 			EcosystemID: 1,
+			Time:        time.Now().Unix(),
 			KeyID:       crypto.Address(publicKey),
 			NetworkID:   conf.Config.LocalConf.NetworkID,
 		},
@@ -428,7 +428,7 @@ func postTxResultMultipart(name string, form getter) (id int64, msg string, err 
 		return
 	}
 
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 	for _, field := range contract.Fields {
 		name := field.Name
 		value := form.Get(name)
@@ -445,11 +445,11 @@ func postTxResultMultipart(name string, form getter) (id int64, msg string, err 
 		case "float":
 			params[name], err = strconv.ParseFloat(value, 64)
 		case "array":
-			var v interface{}
+			var v any
 			err = json.Unmarshal([]byte(value), &v)
 			params[name] = v
 		case "map":
-			var v map[string]interface{}
+			var v map[string]any
 			err = json.Unmarshal([]byte(value), &v)
 			params[name] = v
 		case "string", "money":
@@ -476,19 +476,18 @@ func postTxResultMultipart(name string, form getter) (id int64, msg string, err 
 		return
 	}
 	arrData := make(map[string][]byte)
+
 	for i := 0; i < 1; i++ {
 		conname := crypto.RandSeq(10)
-		tnow := time.Now().Unix()
-		params["Value"] = fmt.Sprintf(`contract rnd%v%d%d  { action { }}`, conname, i, tnow)
 		params["ApplicationId"] = int64(1)
 		params["Conditions"] = "1"
 		//params["TokenEcosystem"] = int64(2)
+		params["Value"] = fmt.Sprintf(`contract rnd%v%d  { action { }}`, conname, i)
 		expedite := strconv.Itoa(1)
-
-		data, txhash, _ := transaction.NewTransaction(types.SmartContract{
+		data, txhash, _ := transaction.NewTransactionInProc(types.SmartTransaction{
 			Header: &types.Header{
 				ID:          int(contract.ID),
-				Time:        tnow,
+				Time:        time.Now().Unix(),
 				EcosystemID: 1,
 				KeyID:       crypto.Address(publicKey),
 				NetworkID:   conf.Config.LocalConf.NetworkID,
@@ -497,7 +496,7 @@ func postTxResultMultipart(name string, form getter) (id int64, msg string, err 
 			Expedite: expedite,
 		}, privateKey)
 		arrData[fmt.Sprintf("%x", txhash)] = data
-		//fmt.Println(fmt.Sprintf("%x", txhash))
+		fmt.Println(fmt.Sprintf("%x", txhash))
 	}
 	ret := &sendTxResult{}
 	err = sendMultipart("sendTx", arrData, &ret)
@@ -537,7 +536,7 @@ func postSignTxResult(name string, form getter) (id int64, msg string, err error
 		return
 	}
 
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 	for _, field := range contract.Fields {
 		name := field.Name
 		value := form.Get(name)
@@ -554,11 +553,11 @@ func postSignTxResult(name string, form getter) (id int64, msg string, err error
 		case "float":
 			params[name], err = strconv.ParseFloat(value, 64)
 		case "array":
-			var v interface{}
+			var v any
 			err = json.Unmarshal([]byte(value), &v)
 			params[name] = v
 		case "map":
-			var v map[string]interface{}
+			var v map[string]any
 			err = json.Unmarshal([]byte(value), &v)
 			params[name] = v
 		case "string", "money":
@@ -585,11 +584,11 @@ func postSignTxResult(name string, form getter) (id int64, msg string, err error
 		return
 	}
 
-	data, _, err := transaction.NewTransaction(types.SmartContract{
+	data, _, err := transaction.NewTransactionInProc(types.SmartTransaction{
 		Header: &types.Header{
 			ID:          int(contract.ID),
-			Time:        time.Now().Unix(),
 			EcosystemID: 1,
+			Time:        time.Now().Unix(),
 			KeyID:       crypto.Address(publicKey),
 			NetworkID:   conf.Config.LocalConf.NetworkID,
 		},
@@ -627,7 +626,7 @@ func postTxResult2(name string, form getter) (id int64, msg string, err error) {
 		return
 	}
 
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 	for _, field := range contract.Fields {
 		name := field.Name
 		value := form.Get(name)
@@ -644,11 +643,11 @@ func postTxResult2(name string, form getter) (id int64, msg string, err error) {
 		case "float":
 			params[name], err = strconv.ParseFloat(value, 64)
 		case "array":
-			var v interface{}
+			var v any
 			err = json.Unmarshal([]byte(value), &v)
 			params[name] = v
 		case "map":
-			var v map[string]interface{}
+			var v map[string]any
 			err = json.Unmarshal([]byte(value), &v)
 			params[name] = v
 		case "string", "money":
@@ -675,11 +674,11 @@ func postTxResult2(name string, form getter) (id int64, msg string, err error) {
 		return
 	}
 
-	data, _, err := transaction.NewTransaction(types.SmartContract{
+	data, _, err := transaction.NewTransactionInProc(types.SmartTransaction{
 		Header: &types.Header{
 			ID:          int(contract.ID),
-			Time:        time.Now().Unix(),
 			EcosystemID: 2,
+			Time:        time.Now().Unix(),
 			KeyID:       crypto.Address(publicKey),
 			NetworkID:   conf.Config.LocalConf.NetworkID,
 		},
@@ -726,6 +725,116 @@ func postTxMultipart(txname string, form *url.Values) error {
 	return err
 }
 
+func postTransferSelfTxMultipart(form *url.Values) error {
+	_, _, err := postTransferSelfTxResult(form)
+	return err
+}
+
+func postUTXOTxMultipart(form *url.Values) error {
+	_, _, err := postUTXOTxResult(form)
+	return err
+}
+
+func postTransferSelfTxResult(form getter) (id int64, msg string, err error) {
+
+	var privateKey, publicKey []byte
+	if privateKey, err = hex.DecodeString(gPrivate); err != nil {
+		return
+	}
+	if publicKey, err = crypto.PrivateToPublic(privateKey); err != nil {
+		return
+	}
+
+	data, _, err := transaction.NewTransactionInProc(types.SmartTransaction{
+		Header: &types.Header{
+			ID:          int(1),
+			EcosystemID: 1,
+			Time:        time.Now().Unix(),
+			KeyID:       crypto.Address(publicKey),
+			NetworkID:   conf.Config.LocalConf.NetworkID,
+		},
+		TransferSelf: &types.TransferSelf{
+			Value: "1000000000000000000",
+			//Asset:  "IBAX",
+			Source: "UTXO",
+			Target: "Account",
+		},
+	}, privateKey)
+	if err != nil {
+		return 0, "", err
+	}
+
+	ret := &sendTxResult{}
+	err = sendMultipart("sendTx", map[string][]byte{
+		"data": data,
+	}, &ret)
+	if err != nil {
+		return
+	}
+
+	if len(form.Get("nowait")) > 0 {
+		return
+	}
+	id, penalty, err := waitTx(ret.Hashes["data"])
+	if id != 0 && err != nil {
+		if penalty == 1 {
+			return
+		}
+		msg = err.Error()
+		err = nil
+	}
+	return
+}
+
+func postUTXOTxResult(form getter) (id int64, msg string, err error) {
+
+	var privateKey, publicKey []byte
+	if privateKey, err = hex.DecodeString(gPrivate); err != nil {
+		return
+	}
+	if publicKey, err = crypto.PrivateToPublic(privateKey); err != nil {
+		return
+	}
+
+	data, _, err := transaction.NewTransactionInProc(types.SmartTransaction{
+		Header: &types.Header{
+			ID:          int(1),
+			EcosystemID: 1,
+			Time:        time.Now().Unix(),
+			KeyID:       crypto.Address(publicKey),
+			NetworkID:   conf.Config.LocalConf.NetworkID,
+		},
+		UTXO: &types.UTXO{
+			Value: "1000000000000000",
+			ToID:  -8055926748644556208,
+		},
+	}, privateKey)
+	if err != nil {
+		return 0, "", err
+	}
+
+	ret := &sendTxResult{}
+	err = sendMultipart("sendTx", map[string][]byte{
+		"data": data,
+	}, &ret)
+	if err != nil {
+		return
+	}
+
+	if len(form.Get("nowait")) > 0 {
+		return
+	}
+	id, penalty, err := waitTx(ret.Hashes["data"])
+	if id != 0 && err != nil {
+		if penalty == 1 {
+			return
+		}
+		msg = err.Error()
+		err = nil
+	}
+	return
+}
+
 func postSignTx(txname string, form *url.Values) error {
 	_, _, err := postSignTxResult(txname, form)
 	return err
@@ -762,7 +871,7 @@ func TestGetAvatar(t *testing.T) {
 	assert.Equal(t, expectedMime, mime, "content type must be a '%s' but returns '%s'", expectedMime, mime)
 }
 
-func sendMultipart(url string, files map[string][]byte, v interface{}) error {
+func sendMultipart(url string, files map[string][]byte, v any) error {
 	body := new(bytes.Buffer)
 	writer := multipart.NewWriter(body)
 

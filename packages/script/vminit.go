@@ -36,7 +36,7 @@ type ExtFuncInfo struct {
 	Results  []reflect.Type
 	Auto     []string
 	Variadic bool
-	Func     interface{}
+	Func     any
 	CanWrite bool // If the function can update DB
 }
 
@@ -46,22 +46,6 @@ type FieldInfo struct {
 	Type     reflect.Type
 	Original uint32
 	Tags     string
-}
-
-var ContractPrices = map[string]string{
-	`@1NewTable`:       `price_create_table`,
-	`@1NewContract`:    `price_create_contract`,
-	`@1NewEcosystem`:   `price_create_ecosystem`,
-	`@1NewMenu`:        `price_create_menu`,
-	`@1NewPage`:        `price_create_page`,
-	`@1NewColumn`:      `price_create_column`,
-	`@1NewApplication`: `price_create_application`,
-	`@1NewSnippet`:     `price_create_snippet`,
-	`@1NewView`:        `price_create_view`,
-	`@1NewToken`:       `price_create_token`,
-	`@1NewAsset`:       `price_create_asset`,
-	`@1NewLang`:        `price_create_lang`,
-	`@1NewSection`:     `price_create_section`,
 }
 
 // ContainsTag returns whether the tag is contained in this field
@@ -76,7 +60,7 @@ type ContractInfo struct {
 	Owner    *OwnerInfo
 	Used     map[string]bool // Called contracts
 	Tx       *[]*FieldInfo
-	Settings map[string]interface{}
+	Settings map[string]any
 	CanWrite bool // If the function can update DB
 }
 
@@ -137,12 +121,12 @@ func NewVM() *VM {
 	vm := &VM{
 		CodeBlock: NewCodeBlock(),
 	}
-	vm.logger = log.WithFields(log.Fields{"extern": vm.Extern, "vm_block_type": vm.CodeBlock.Type})
+	vm.logger = log.WithFields(log.Fields{"type": consts.VMError, "extern": vm.Extern, "vm_block_type": vm.CodeBlock.Type})
 	return vm
 }
 
 func getNameByObj(obj *ObjInfo) (name string) {
-	block := obj.Value.CodeBlock()
+	block := obj.GetCodeBlock()
 	for key, val := range block.Parent.Objects {
 		if val == obj {
 			name = key
@@ -153,9 +137,9 @@ func getNameByObj(obj *ObjInfo) (name string) {
 }
 
 // Call executes the name object with the specified params and extended variables and functions
-func (vm *VM) Call(name string, params []interface{}, extend map[string]interface{}) (ret []interface{}, err error) {
+func (vm *VM) Call(name string, params []any, extend map[string]any) (ret []any, err error) {
 	var obj *ObjInfo
-	if state, ok := extend[`rt_state`]; ok {
+	if state, ok := extend[Extend_rt_state]; ok {
 		obj = vm.getObjByNameExt(name, state.(uint32))
 	} else {
 		obj = vm.getObjByName(name)
@@ -167,16 +151,16 @@ func (vm *VM) Call(name string, params []interface{}, extend map[string]interfac
 	switch obj.Type {
 	case ObjectType_Func:
 		var cost int64
-		if v, ok := extend[`txcost`]; ok {
+		if v, ok := extend[Extend_txcost]; ok {
 			cost = v.(int64)
 		} else {
 			cost = syspar.GetMaxCost()
 		}
 		rt := NewRunTime(vm, cost)
-		ret, err = rt.Run(obj.Value.CodeBlock(), params, extend)
-		extend[`txcost`] = rt.Cost()
+		ret, err = rt.Run(obj.GetCodeBlock(), params, extend)
+		extend[Extend_txcost] = rt.Cost()
 	case ObjectType_ExtFunc:
-		finfo := obj.Value.ExtFuncInfo()
+		finfo := obj.GetExtFuncInfo()
 		foo := reflect.ValueOf(finfo.Func)
 		var result []reflect.Value
 		pars := make([]reflect.Value, len(finfo.Params))

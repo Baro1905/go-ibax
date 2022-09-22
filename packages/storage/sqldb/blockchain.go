@@ -11,15 +11,17 @@ import (
 
 // BlockChain is model
 type BlockChain struct {
-	ID            int64  `gorm:"primary_key;not_null"`
-	Hash          []byte `gorm:"not null"`
-	RollbacksHash []byte `gorm:"not null"`
-	Data          []byte `gorm:"not null"`
-	EcosystemID   int64  `gorm:"not null"`
-	KeyID         int64  `gorm:"not null"`
-	NodePosition  int64  `gorm:"not null"`
-	Time          int64  `gorm:"not null"`
-	Tx            int32  `gorm:"not null"`
+	ID             int64  `gorm:"primary_key;not_null"`
+	Hash           []byte `gorm:"not null"`
+	RollbacksHash  []byte `gorm:"not null"`
+	Data           []byte `gorm:"not null"`
+	EcosystemID    int64  `gorm:"not null"`
+	KeyID          int64  `gorm:"not null"`
+	NodePosition   int64  `gorm:"not null"`
+	Time           int64  `gorm:"not null"`
+	Tx             int32  `gorm:"not null"`
+	ConsensusMode  int32  `gorm:"not null"`
+	CandidateNodes []byte `gorm:"not null"`
 }
 
 // TableName returns name of table
@@ -28,8 +30,8 @@ func (BlockChain) TableName() string {
 }
 
 // Create is creating record of model
-func (b *BlockChain) Create(transaction *DbTransaction) error {
-	return GetDB(transaction).Create(b).Error
+func (b *BlockChain) Create(dbTx *DbTransaction) error {
+	return GetDB(dbTx).Create(b).Error
 }
 
 // Get is retrieving model from database
@@ -80,13 +82,12 @@ func (b *BlockChain) GetBlocks(startFromID int64, limit int) ([]BlockChain, erro
 
 // GetBlocksFrom is retrieving ordered chain of blocks from database
 func (b *BlockChain) GetBlocksFrom(startFromID int64, ordering string, limit int) ([]BlockChain, error) {
-	var err error
 	blockchain := new([]BlockChain)
-	if limit == 0 {
-		err = DBConn.Order("id "+ordering).Where("id > ?", startFromID).Find(&blockchain).Error
-	} else {
-		err = DBConn.Order("id "+ordering).Where("id > ?", startFromID).Limit(limit).Find(&blockchain).Error
+	q := DBConn.Model(&BlockChain{}).Order("id "+ordering).Where("id > ?", startFromID)
+	if limit > 0 {
+		q = q.Limit(limit)
 	}
+	err := q.Find(&blockchain).Error
 	return *blockchain, err
 }
 
@@ -107,8 +108,8 @@ func (b *BlockChain) GetNodeBlocksAtTime(from, to time.Time, node int64) ([]Bloc
 }
 
 // DeleteById is deleting block by ID
-func (b *BlockChain) DeleteById(transaction *DbTransaction, id int64) error {
-	return GetDB(transaction).Where("id = ?", id).Delete(BlockChain{}).Error
+func (b *BlockChain) DeleteById(dbTx *DbTransaction, id int64) error {
+	return GetDB(dbTx).Where("id = ?", id).Delete(BlockChain{}).Error
 }
 
 func GetTxCount() (int64, error) {
@@ -125,4 +126,10 @@ func GetBlockCountByNode(NodePosition int64) (int64, error) {
 	err := row.Scan(&BlockCount)
 
 	return BlockCount, err
+}
+func (b *BlockChain) GetRecentBlockChain(startBlockId int64, maxBlockId int64) ([]BlockChain, error) {
+	blockchain := new([]BlockChain)
+	err := DBConn.Where("id > ? and id <= ?", startBlockId, maxBlockId).Find(&blockchain).Error
+
+	return *blockchain, err
 }

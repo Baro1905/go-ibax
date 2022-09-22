@@ -85,10 +85,10 @@ func getBlockInfoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type TxInfo struct {
-	Hash         []byte                 `json:"hash"`
-	ContractName string                 `json:"contract_name"`
-	Params       map[string]interface{} `json:"params"`
-	KeyID        int64                  `json:"key_id"`
+	Hash         []byte         `json:"hash"`
+	ContractName string         `json:"contract_name"`
+	Params       map[string]any `json:"params"`
+	KeyID        int64          `json:"key_id"`
 }
 
 type blocksTxInfoForm struct {
@@ -99,6 +99,13 @@ type blocksTxInfoForm struct {
 func (f *blocksTxInfoForm) Validate(r *http.Request) error {
 	if f.BlockID > 0 {
 		f.BlockID--
+	}
+	if f.Count <= 0 {
+		f.Count = defaultPaginatorLimit
+	}
+
+	if f.Count > maxPaginatorLimit {
+		f.Count = maxPaginatorLimit
 	}
 	return nil
 }
@@ -131,7 +138,7 @@ func getBlocksTxInfoHandler(w http.ResponseWriter, r *http.Request) {
 
 	result := map[int64][]TxInfo{}
 	for _, blockModel := range blocks {
-		blck, err := block.UnmarshallBlock(bytes.NewBuffer(blockModel.Data), false)
+		blck, err := block.UnmarshallBlock(bytes.NewBuffer(blockModel.Data))
 		if err != nil {
 			logger.WithFields(log.Fields{"type": consts.UnmarshallingError, "error": err, "bolck_id": blockModel.ID}).Error("on unmarshalling block")
 			errorResponse(w, err)
@@ -141,18 +148,20 @@ func getBlocksTxInfoHandler(w http.ResponseWriter, r *http.Request) {
 		txInfoCollection := make([]TxInfo, 0, len(blck.Transactions))
 		for _, tx := range blck.Transactions {
 			txInfo := TxInfo{
-				Hash: tx.TxHash(),
+				Hash: tx.Hash(),
 			}
 
 			if tx.IsSmartContract() {
-				txInfo.ContractName = tx.SmartContract().TxContract.Name
+				if tx.SmartContract().TxContract != nil {
+					txInfo.ContractName = tx.SmartContract().TxContract.Name
+				}
 				txInfo.Params = tx.SmartContract().TxData
 			}
 
 			if blck.IsGenesis() {
-				txInfo.KeyID = blck.Header.KeyID
+				txInfo.KeyID = blck.Header.KeyId
 			} else {
-				txInfo.KeyID = tx.TxKeyID()
+				txInfo.KeyID = tx.KeyID()
 			}
 
 			txInfoCollection = append(txInfoCollection, txInfo)
@@ -167,13 +176,13 @@ func getBlocksTxInfoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type TxDetailedInfo struct {
-	Hash         []byte                 `json:"hash"`
-	ContractName string                 `json:"contract_name"`
-	Params       map[string]interface{} `json:"params"`
-	KeyID        int64                  `json:"key_id"`
-	Time         int64                  `json:"time"`
-	Type         byte                   `json:"type"`
-	Size         string                 `json:"size"`
+	Hash         []byte         `json:"hash"`
+	ContractName string         `json:"contract_name"`
+	Params       map[string]any `json:"params"`
+	KeyID        int64          `json:"key_id"`
+	Time         int64          `json:"time"`
+	Type         byte           `json:"type"`
+	Size         string         `json:"size"`
 }
 
 type BlockHeaderInfo struct {
@@ -197,7 +206,7 @@ type BlockDetailedInfo struct {
 	Tx            int32            `json:"tx_count"`
 	Size          string           `json:"size"`
 	RollbacksHash []byte           `json:"rollbacks_hash"`
-	MrklRoot      []byte           `json:"mrkl_root"`
+	MerkleRoot    []byte           `json:"merkle_root"`
 	BinData       []byte           `json:"bin_data"`
 	SysUpdate     bool             `json:"-"`
 	GenBlock      bool             `json:"-"`
@@ -233,9 +242,9 @@ func getBlocksDetailedInfoHandler(w http.ResponseWriter, r *http.Request) {
 
 	result := map[int64]BlockDetailedInfo{}
 	for _, blockModel := range blocks {
-		blck, err := block.UnmarshallBlock(bytes.NewBuffer(blockModel.Data), false)
+		blck, err := block.UnmarshallBlock(bytes.NewBuffer(blockModel.Data))
 		if err != nil {
-			logger.WithFields(log.Fields{"type": consts.UnmarshallingError, "error": err, "bolck_id": blockModel.ID}).Error("on unmarshalling block")
+			logger.WithFields(log.Fields{"type": consts.UnmarshallingError, "error": err, "block_id": blockModel.ID}).Error("on unmarshalling block")
 			errorResponse(w, err)
 			return
 		}
@@ -243,15 +252,17 @@ func getBlocksDetailedInfoHandler(w http.ResponseWriter, r *http.Request) {
 		txDetailedInfoCollection := make([]TxDetailedInfo, 0, len(blck.Transactions))
 		for _, tx := range blck.Transactions {
 			txDetailedInfo := TxDetailedInfo{
-				Hash:  tx.TxHash(),
-				KeyID: tx.TxKeyID(),
-				Time:  tx.TxTime(),
-				Type:  tx.TxType(),
-				Size:  common.StorageSize(len(tx.TxPayload())).TerminalString(),
+				Hash:  tx.Hash(),
+				KeyID: tx.KeyID(),
+				Time:  tx.Timestamp(),
+				Type:  tx.Type(),
+				Size:  common.StorageSize(len(tx.Payload())).TerminalString(),
 			}
 
 			if tx.IsSmartContract() {
-				txDetailedInfo.ContractName = tx.SmartContract().TxContract.Name
+				if tx.SmartContract().TxContract != nil {
+					txDetailedInfo.ContractName = tx.SmartContract().TxContract.Name
+				}
 				txDetailedInfo.Params = tx.SmartContract().TxData
 			}
 
@@ -261,14 +272,14 @@ func getBlocksDetailedInfoHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		header := BlockHeaderInfo{
-			BlockID:      blck.Header.BlockID,
-			Time:         blck.Header.Time,
-			EcosystemID:  blck.Header.EcosystemID,
-			KeyID:        blck.Header.KeyID,
+			BlockID:      blck.Header.BlockId,
+			Time:         blck.Header.Timestamp,
+			EcosystemID:  blck.Header.EcosystemId,
+			KeyID:        blck.Header.KeyId,
 			NodePosition: blck.Header.NodePosition,
 			Sign:         blck.Header.Sign,
-			Hash:         blck.Header.Hash,
-			Version:      blck.Header.Version,
+			Hash:         blck.Header.BlockHash,
+			Version:      int(blck.Header.Version),
 		}
 
 		bdi := BlockDetailedInfo{
@@ -280,7 +291,7 @@ func getBlocksDetailedInfoHandler(w http.ResponseWriter, r *http.Request) {
 			Time:          blockModel.Time,
 			Tx:            blockModel.Tx,
 			RollbacksHash: blockModel.RollbacksHash,
-			MrklRoot:      blck.MrklRoot,
+			MerkleRoot:    blck.MerkleRoot,
 			BinData:       blck.BinData,
 			Size:          common.StorageSize(len(blockModel.Data)).TerminalString(),
 			SysUpdate:     blck.SysUpdate,

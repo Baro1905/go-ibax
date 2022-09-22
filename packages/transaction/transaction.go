@@ -6,42 +6,29 @@ package transaction
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
 
-	"github.com/shopspring/decimal"
-
+	"github.com/IBAX-io/go-ibax/packages/pbgo"
 	"github.com/IBAX-io/go-ibax/packages/storage/sqldb"
-
 	"github.com/IBAX-io/go-ibax/packages/types"
+	"github.com/shopspring/decimal"
 )
 
 // Transaction is a structure for parsing transactions
 type Transaction struct {
-	Notifications  types.Notifications
-	GenBlock       bool
-	SysUpdate      bool
-	RollBackTx     []*sqldb.RollbackTx
-	BlockData      *types.BlockData
-	PreBlockData   *types.BlockData
-	DbTransaction  *sqldb.DbTransaction
-	Rand           *rand.Rand
-	TxCheckLimits  *Limits
-	TxResult       string
-	SqlDbSavePoint int
-	FullData       []byte // full transaction, with type and data
-	Inner          TransactionCaller
+	FullData []byte // full transaction, with type and data
+	*InToCxt
+	*OutCtx
+	Inner TransactionCaller
 }
 
 // TransactionCaller is parsing transactions
 type TransactionCaller interface {
-	Init(*Transaction) error
+	Init(*InToCxt) error
 	Validate() error
-	Action(*Transaction) error
+	Action(*InToCxt, *OutCtx) error
 	TxRollback() error
-	TransactionInfoer
-}
-
-type TransactionInfoer interface {
 	txType() byte
 	txHash() []byte
 	txPayload() []byte
@@ -50,29 +37,82 @@ type TransactionInfoer interface {
 	txExpedite() decimal.Decimal
 }
 
-func (t *Transaction) TxType() byte                { return t.Inner.txType() }
-func (t *Transaction) TxHash() []byte              { return t.Inner.txHash() }
-func (t *Transaction) TxPayload() []byte           { return t.Inner.txPayload() }
-func (t *Transaction) TxTime() int64               { return t.Inner.txTime() }
-func (t *Transaction) TxKeyID() int64              { return t.Inner.txKeyID() }
-func (t *Transaction) TxExpedite() decimal.Decimal { return t.Inner.txExpedite() }
+func (t *Transaction) Type() byte                { return t.Inner.txType() }
+func (t *Transaction) Hash() []byte              { return t.Inner.txHash() }
+func (t *Transaction) Payload() []byte           { return t.Inner.txPayload() }
+func (t *Transaction) Timestamp() int64          { return t.Inner.txTime() }
+func (t *Transaction) KeyID() int64              { return t.Inner.txKeyID() }
+func (t *Transaction) Expedite() decimal.Decimal { return t.Inner.txExpedite() }
 
 func (t *Transaction) IsSmartContract() bool {
-	_, ok := t.Inner.(*SmartContractTransaction)
+	_, ok := t.Inner.(*SmartTransactionParser)
 	return ok
 }
 
-func (t *Transaction) SmartContract() *SmartContractTransaction {
-	return t.Inner.(*SmartContractTransaction)
+func (t *Transaction) SmartContract() *SmartTransactionParser {
+	return t.Inner.(*SmartTransactionParser)
 }
 
 // UnmarshallTransaction is unmarshalling transaction
-func UnmarshallTransaction(buffer *bytes.Buffer, fillData bool) (*Transaction, error) {
+func UnmarshallTransaction(buffer *bytes.Buffer) (*Transaction, error) {
 	tx := &Transaction{}
-	if err := tx.Unmarshall(buffer); err != nil {
-		return nil, err
+	var err error
+	defer func() {
+		if err != nil && tx != nil {
+			if tx.Inner == nil {
+				return
+			}
+			_ = MarkTransactionBad(tx.Hash(), err.Error())
+		}
+	}()
+	err = tx.Unmarshall(buffer)
+	if err != nil {
+		return nil, fmt.Errorf("parse transaction error: %w", err)
 	}
-	txCache.Set(tx)
-
 	return tx, nil
+}
+
+func (tr *Transaction) WithOption(
+	notifications types.Notifications,
+	genBlock bool,
+	blockHeader, preBlockHeader *types.BlockHeader,
+	dbTransaction *sqldb.DbTransaction,
+	rand *rand.Rand,
+	txCheckLimits *Limits,
+	sqlDbSavePoint string,
+	outputsMap map[sqldb.KeyUTXO][]sqldb.SpentInfo,
+	prevSysPar map[string]string,
+	opts ...TransactionOption) error {
+	in := &InToCxt{
+		SqlDbSavePoint: sqlDbSavePoint,
+		TxCheckLimits:  txCheckLimits,
+		Rand:           rand,
+		DbTransaction:  dbTransaction,
+		PreBlockHeader: preBlockHeader,
+		BlockHeader:    blockHeader,
+		GenBlock:       genBlock,
+		Notifications:  notifications,
+		OutputsMap:     outputsMap,
+		PrevSysPar:     prevSysPar,
+	}
+	in.DbTransaction.BinLogSql = nil
+	tr.InToCxt = in
+	tr.OutCtx = &OutCtx{
+		TxResult: &pbgo.TxResult{Hash: tr.Hash()},
+	}
+	return tr.Apply(opts...)
+}
+
+type TransactionOption func(b *Transaction) error
+
+func (tr *Transaction) Apply(opts ...TransactionOption) error {
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		if err := opt(tr); err != nil {
+			return err
+		}
+	}
+	return nil
 }

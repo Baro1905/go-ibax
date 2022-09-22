@@ -8,11 +8,11 @@ package daemons
 import (
 	"bytes"
 	"context"
-	"errors"
 	"sync/atomic"
 	"time"
 
 	"github.com/IBAX-io/go-ibax/packages/block"
+
 	"github.com/IBAX-io/go-ibax/packages/conf"
 	"github.com/IBAX-io/go-ibax/packages/conf/syspar"
 	"github.com/IBAX-io/go-ibax/packages/consts"
@@ -22,6 +22,7 @@ import (
 	"github.com/IBAX-io/go-ibax/packages/transaction"
 	"github.com/IBAX-io/go-ibax/packages/types"
 	"github.com/IBAX-io/go-ibax/packages/utils"
+	"github.com/pkg/errors"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -33,6 +34,14 @@ func BlockGenerator(ctx context.Context, d *daemon) error {
 	} else {
 		return nil
 	}
+	DBLock()
+	defer DBUnlock()
+	candidateNodes, err := sqldb.GetCandidateNode(syspar.SysInt(syspar.NumberNodes))
+	if err == nil && len(candidateNodes) > 0 {
+		syspar.SetRunModel(consts.CandidateNodeMode)
+		return BlockGeneratorCandidate(ctx, d)
+	}
+	syspar.SetRunModel(consts.HonorNodeMode)
 	d.sleepTime = time.Second
 	if node.IsNodePaused() {
 		return nil
@@ -41,15 +50,12 @@ func BlockGenerator(ctx context.Context, d *daemon) error {
 	nodePosition, err := syspar.GetThisNodePosition()
 	if err != nil {
 		// we are not honor node and can't generate new blocks
-		d.sleepTime = 4 * time.Second
+		d.sleepTime = syspar.GetMaxBlockTimeDuration()
 		d.logger.WithFields(log.Fields{"type": consts.JustWaiting, "error": err}).Debug("we are not honor node, sleep for 10 seconds")
 		return nil
 	}
 
-	DBLock()
-	defer DBUnlock()
-
-	// wee need fresh myNodePosition after locking
+	// we need fresh myNodePosition after locking
 	nodePosition, err = syspar.GetThisNodePosition()
 	if err != nil {
 		d.logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("getting node position by key id")
@@ -58,7 +64,6 @@ func BlockGenerator(ctx context.Context, d *daemon) error {
 
 	btc := protocols.NewBlockTimeCounter()
 	st := time.Now()
-
 	if exists, err := btc.BlockForTimeExists(st, int(nodePosition)); exists || err != nil {
 		return nil
 	}
@@ -73,7 +78,6 @@ func BlockGenerator(ctx context.Context, d *daemon) error {
 		d.logger.WithFields(log.Fields{"type": consts.JustWaiting}).Debug("not my generation time")
 		return nil
 	}
-
 	//if !NtpDriftFlag {
 	//	d.logger.WithFields(log.Fields{"type": consts.Ntpdate}).Error("ntp time not ntpdate")
 	//	return nil
@@ -90,14 +94,6 @@ func BlockGenerator(ctx context.Context, d *daemon) error {
 	//	d.logger.WithFields(log.Fields{"type": consts.JustWaiting}).Debug("not my confirmation time")
 	//	return nil
 	//}
-
-	_, endTime, err := btc.RangeByTime(st)
-	if err != nil {
-		log.WithFields(log.Fields{"type": consts.TimeCalcError, "error": err}).Error("on getting end time of generation")
-		return err
-	}
-
-	done := time.After(endTime.Sub(st))
 	prevBlock := &sqldb.InfoBlock{}
 	_, err = prevBlock.Get()
 	if err != nil {
@@ -123,7 +119,7 @@ func BlockGenerator(ctx context.Context, d *daemon) error {
 		return err
 	}
 
-	trs, err := processTransactions(d.logger, txs, done, st.Unix())
+	trs, classifyTxsMap, err := processTransactionsNew(d.logger, txs, st)
 	if err != nil {
 		return err
 	}
@@ -133,59 +129,54 @@ func BlockGenerator(ctx context.Context, d *daemon) error {
 		return nil
 	}
 
-	header := &types.BlockData{
-		BlockID:      prevBlock.BlockID + 1,
-		Time:         st.Unix(),
-		EcosystemID:  0,
-		KeyID:        conf.Config.KeyID,
-		NodePosition: nodePosition,
-		Version:      consts.BlockVersion,
+	header := &types.BlockHeader{
+		BlockId:       prevBlock.BlockID + 1,
+		Timestamp:     st.Unix(),
+		EcosystemId:   0,
+		KeyId:         conf.Config.KeyID,
+		NetworkId:     conf.Config.LocalConf.NetworkID,
+		NodePosition:  nodePosition,
+		Version:       consts.BlockVersion,
+		ConsensusMode: consts.HonorNodeMode,
 	}
 
-	pb := &types.BlockData{
-		BlockID:       prevBlock.BlockID,
-		Hash:          prevBlock.Hash,
+	prev := &types.BlockHeader{
+		BlockId:       prevBlock.BlockID,
+		BlockHash:     prevBlock.Hash,
 		RollbacksHash: prevBlock.RollbacksHash,
 	}
 
-	blockBin, err := generateNextBlock(header, trs, NodePrivateKey, pb)
+	err = generateProcessBlockNew(header, prev, trs, classifyTxsMap)
 	if err != nil {
 		return err
 	}
-
-	err = block.InsertBlockWOForks(blockBin, true, false)
-	if err != nil {
-		log.WithFields(log.Fields{"error": err}).Error("on inserting new block")
-		return err
-	}
-	log.WithFields(log.Fields{"block": header.String(), "type": consts.SyncProcess}).Debug("Generated block ID")
-
-	//go notificator.CheckTokenMovementLimits(nil, conf.Config.TokenMovement, header.BlockID)
+	//go notificator.CheckTokenMovementLimits(nil, conf.Config.TokenMovement, header.BlockId)
 	return nil
 }
 
-func generateNextBlock(blockHeader *types.BlockData, trs []*sqldb.Transaction, key string, prevBlock *types.BlockData) ([]byte, error) {
-	trData := make([][]byte, 0, len(trs))
-	for _, tr := range trs {
-		trData = append(trData, tr.Data)
-	}
-
-	return block.MarshallBlock(blockHeader, trData, prevBlock, key)
+func generateNextBlock(blockHeader, prevBlock *types.BlockHeader, trs [][]byte) ([]byte, error) {
+	return block.MarshallBlock(
+		types.WithCurHeader(blockHeader),
+		types.WithPrevHeader(prevBlock),
+		types.WithTxFullData(trs))
 }
 
-func processTransactions(logger *log.Entry, txs []*sqldb.Transaction, done <-chan time.Time, st int64) ([]*sqldb.Transaction, error) {
-	//p := new(transaction.Transaction)
-
-	//verify transactions
-	//err := transaction.ProcessTransactionsQueue(p.DbTransaction)
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	trs, err := sqldb.GetAllUnusedTransactions(nil, syspar.GetMaxTxCount())
+func processTransactionsNew(logger *log.Entry, txs []*sqldb.Transaction, st time.Time) ([][]byte, map[int][]*transaction.Transaction, error) {
+	classifyTxsMap := make(map[int][]*transaction.Transaction)
+	var done = make(<-chan time.Time, 1)
+	if syspar.IsHonorNodeMode() {
+		btc := protocols.NewBlockTimeCounter()
+		_, endTime, err := btc.RangeByTime(st)
+		if err != nil {
+			log.WithFields(log.Fields{"type": consts.TimeCalcError, "error": err}).Error("on getting end time of generation")
+			return nil, nil, err
+		}
+		done = time.After(endTime.Sub(st))
+	}
+	trs, err := sqldb.GetAllUnusedTransactions(nil, syspar.GetMaxTxCount()-len(txs))
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("getting all unused transactions")
-		return nil, err
+		return nil, nil, err
 	}
 
 	limits := transaction.NewLimits(transaction.GetLetPreprocess())
@@ -202,7 +193,7 @@ func processTransactions(logger *log.Entry, txs []*sqldb.Transaction, done <-cha
 		go func() {
 			for badTxItem := range ch {
 				transaction.BadTxForBan(badTxItem.keyID)
-				_ = transaction.MarkTransactionBad(dbTx, badTxItem.hash, badTxItem.msg)
+				_ = transaction.MarkTransactionBad(badTxItem.hash, badTxItem.msg)
 			}
 		}()
 
@@ -216,44 +207,73 @@ func processTransactions(logger *log.Entry, txs []*sqldb.Transaction, done <-cha
 	}()
 
 	// Checks preprocessing count limits
-	txList := make([]*sqldb.Transaction, 0, len(trs))
+	txList := make([][]byte, 0, len(trs))
 	txs = append(txs, trs...)
-	for i, txItem := range txs {
-		select {
-		case <-done:
-			return txList, nil
-		default:
-			if txItem.GetTransactionRateStopNetwork() {
-				txList = append(txList[:0], txs[i])
-				break
-			}
-			bufTransaction := bytes.NewBuffer(txItem.Data)
-			tr, err := transaction.UnmarshallTransaction(bufTransaction, true)
-			if err != nil {
-				if tr != nil {
-					txBadChan <- badTxStruct{hash: tr.TxHash(), msg: err.Error(), keyID: tr.TxKeyID()}
-				}
-				continue
-			}
 
-			if err := tr.Check(st); err != nil {
-				txBadChan <- badTxStruct{hash: tr.TxHash(), msg: err.Error(), keyID: tr.TxKeyID()}
-				continue
-			}
-
-			if tr.IsSmartContract() {
-				err = limits.CheckLimit(tr)
-				if err == transaction.ErrLimitStop && i > 0 {
-					break
-				} else if err != nil {
-					if err != transaction.ErrLimitSkip {
-						txBadChan <- badTxStruct{hash: tr.TxHash(), msg: err.Error(), keyID: tr.TxKeyID()}
-					}
-					continue
-				}
-			}
-			txList = append(txList, txs[i])
-		}
+	allDelayedContract, err := sqldb.GetAllDelayedContract()
+	if err != nil {
+		return nil, nil, err
 	}
-	return txList, nil
+	var contractNames []string
+	for _, contract := range allDelayedContract {
+		contractNames = append(contractNames, contract.Contract)
+	}
+
+	for i, txItem := range txs {
+		if syspar.IsHonorNodeMode() {
+			select {
+			case <-done:
+				return txList, classifyTxsMap, nil
+			default:
+			}
+		}
+		bufTransaction := bytes.NewBuffer(txItem.Data)
+		tr, err := transaction.UnmarshallTransaction(bufTransaction)
+		if err != nil {
+			if tr != nil {
+				txBadChan <- badTxStruct{hash: tr.Hash(), msg: err.Error(), keyID: tr.KeyID()}
+			}
+			continue
+		}
+
+		if err := tr.Check(st.Unix()); err != nil {
+			txBadChan <- badTxStruct{hash: tr.Hash(), msg: err.Error(), keyID: tr.KeyID()}
+			continue
+		}
+		if txItem.GetTransactionRateStopNetwork() {
+			classifyTxsMap[types.StopNetworkTxType] = append(classifyTxsMap[types.StopNetworkTxType], tr)
+			txList = append(txList[:0], txs[i].Data)
+			break
+		}
+		if tr.IsSmartContract() {
+			err = limits.CheckLimit(tr.Inner)
+			if errors.Cause(err) == transaction.ErrLimitStop && i > 0 {
+				break
+			} else if err != nil {
+				if err != transaction.ErrLimitSkip {
+					txBadChan <- badTxStruct{hash: tr.Hash(), msg: err.Error(), keyID: tr.KeyID()}
+				}
+				continue
+			}
+			if tr.Type() == types.TransferSelfTxType {
+				classifyTxsMap[types.TransferSelfTxType] = append(classifyTxsMap[types.TransferSelfTxType], tr)
+				txList = append(txList, txs[i].Data)
+				continue
+			}
+			if tr.Type() == types.UtxoTxType {
+				classifyTxsMap[types.UtxoTxType] = append(classifyTxsMap[types.UtxoTxType], tr)
+				txList = append(txList, txs[i].Data)
+				continue
+			}
+
+			if utils.StringInSlice(contractNames, tr.SmartContract().TxContract.Name) {
+				classifyTxsMap[types.DelayTxType] = append(classifyTxsMap[types.DelayTxType], tr)
+				txList = append(txList, txs[i].Data)
+				continue
+			}
+			classifyTxsMap[types.SmartContractTxType] = append(classifyTxsMap[types.SmartContractTxType], tr)
+		}
+		txList = append(txList, txs[i].Data)
+	}
+	return txList, classifyTxsMap, nil
 }

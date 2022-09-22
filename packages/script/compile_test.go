@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/IBAX-io/go-ibax/packages/types"
 
 	"github.com/shopspring/decimal"
@@ -17,7 +19,7 @@ import (
 type TestVM struct {
 	Input  string
 	Func   string
-	Output interface{}
+	Output any
 }
 
 func (block *CodeBlock) String() (ret string) {
@@ -42,24 +44,24 @@ func getMap() *types.Map {
 	return myMap
 }
 
-func getArray() []interface{} {
+func getArray() []any {
 	myMap := types.NewMap()
 	myMap.Set(`par0`, `Parameter 0`)
 	myMap.Set(`par1`, `Parameter 1`)
-	return []interface{}{myMap,
+	return []any{myMap,
 		"The second string", int64(2000)}
 }
 
 // Str converts the value to a string
-func str(v interface{}) (ret string) {
+func str(v any) (ret string) {
 	return fmt.Sprint(v)
 }
 
-func lenArray(par []interface{}) int64 {
+func lenArray(par []any) int64 {
 	return int64(len(par))
 }
 
-func Money(v interface{}) (ret decimal.Decimal) {
+func Money(v any) (ret decimal.Decimal) {
 	ret, _ = ValueToDecimal(v)
 	return ret
 }
@@ -678,7 +680,7 @@ func TestVMCompile(t *testing.T) {
 	}
 	vm := NewVM()
 	vm.Extern = true
-	vm.Extend(&ExtendData{map[string]interface{}{"Println": fmt.Println, "Sprintf": fmt.Sprintf,
+	vm.Extend(&ExtendData{map[string]any{"Println": fmt.Println, "Sprintf": fmt.Sprintf,
 		"GetMap": getMap, "GetArray": getArray, "lenArray": lenArray, "outMap": outMap,
 		"str": str, "Money": Money, "Replace": strings.Replace}, nil,
 		map[string]struct{}{"Sprintf": {}}})
@@ -697,8 +699,8 @@ func TestVMCompile(t *testing.T) {
 			glob := types.NewMap()
 			glob.Set(`test`, `String value`)
 			glob.Set(`number`, 1001)
-			if out, err := vm.Call(item.Func, nil, &map[string]interface{}{
-				`rt_state`: uint32(ikey) + 22, `data`: make([]interface{}, 0),
+			if out, err := vm.Call(item.Func, nil, map[string]any{
+				`rt_state`: uint32(ikey) + 22, `data`: make([]any, 0),
 				`test1`: 101, `test2`: `test 2`,
 				"glob": glob,
 				`test3`: func(param int64) string {
@@ -719,7 +721,7 @@ func TestVMCompile(t *testing.T) {
 }
 
 func TestContractList(t *testing.T) {
-	test := []TestLexem{{`contract NewContract {
+	test := []TestLexeme{{`contract NewContract {
 		conditions {
 			ValidateCondition($Conditions,$ecosystem_id)
 			while i < Len(list) {
@@ -755,5 +757,54 @@ func TestContractList(t *testing.T) {
 			t.Error(`wrong names`, strings.Join(list, `,`))
 			break
 		}
+	}
+}
+
+func TestVM_CompileBlock(t *testing.T) {
+	r := []rune(`
+		contract aaa {
+			data { 
+				key_id int
+				//time string
+			}
+			func bbb(account_id int){
+				//$key_id = 2
+				account_id = 3
+			}
+			conditions {
+				//$key_id = 3
+  			}
+			action {
+			}
+		}
+`)
+	type args struct {
+		input []rune
+		owner *OwnerInfo
+	}
+	vm := NewVM()
+	tests := []struct {
+		name    string
+		args    args
+		want    *CodeBlock
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{name: "collides", args: args{
+			r, &OwnerInfo{StateID: 1},
+		}, wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			if err != nil {
+				return true
+			}
+			return false
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := vm.CompileBlock(tt.args.input, tt.args.owner)
+			if !tt.wantErr(t, err, fmt.Sprintf("CompileBlock(%v, %v)", tt.args.input, tt.args.owner)) {
+				return
+			}
+			assert.Equalf(t, tt.want, got, "CompileBlock(%v, %v)", tt.args.input, tt.args.owner)
+		})
 	}
 }

@@ -33,10 +33,10 @@ var rollbackCmd = &cobra.Command{
 			return
 		}
 		if err := syspar.SysUpdate(nil); err != nil {
-			log.WithError(err).Error("can't read system parameters")
+			log.WithError(err).Error("can't read platform parameters")
 		}
 		if err := syspar.SysTableColType(nil); err != nil {
-			log.WithFields(log.Fields{"error": err}).Error("updating sys table col type")
+			log.WithError(err).Error("updating sys table col type")
 		}
 
 		smart.InitVM()
