@@ -30,7 +30,7 @@ func (DelayedContract) TableName() string {
 // GetAllDelayedContractsForBlockID returns contracts that want to execute for blockID
 func GetAllDelayedContractsForBlockID(blockID int64) ([]*DelayedContract, error) {
 	var contracts []*DelayedContract
-	if err := DBConn.Where(`block_id <= ? AND ?%every_block = 0 AND deleted = ? AND (counter < "1_delayed_contracts".limit OR "1_delayed_contracts".limit = 0)`,
+	if err := DBConn.Where("block_id <= ? AND ?%every_block = 0 AND deleted = ? AND (counter < \"1_delayed_contracts\".limit OR \"1_delayed_contracts\".limit = 0)",
 		blockID, blockID, availableDelayedContracts).Order("high_rate desc").Find(&contracts).Error; err != nil {
 		return nil, err
 	}
@@ -40,17 +40,4 @@ func GetAllDelayedContractsForBlockID(blockID int64) ([]*DelayedContract, error)
 // Get is retrieving model from database
 func (dc *DelayedContract) Get(id int64) (bool, error) {
 	return isFound(DBConn.Where("id = ?", id).First(dc))
-}
-
-// GetByContract is retrieving model by contract from database
-func (dc *DelayedContract) GetByContract(dbTx *DbTransaction, contract string) (bool, error) {
-	return isFound(GetDB(dbTx).Where("contract = ? AND deleted = ?", contract, availableDelayedContracts).First(dc))
-}
-
-func GetAllDelayedContract() ([]*DelayedContract, error) {
-	var contracts []*DelayedContract
-	if err := DBConn.Where(" deleted = ?", availableDelayedContracts).Find(&contracts).Error; err != nil {
-		return nil, err
-	}
-	return contracts, nil
 }

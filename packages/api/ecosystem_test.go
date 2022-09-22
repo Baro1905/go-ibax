@@ -102,10 +102,10 @@ func TestEditEcosystem(t *testing.T) {
 	}
 }
 
-func TestPlatformParams(t *testing.T) {
+func TestEcosystemParams(t *testing.T) {
 	require.NoError(t, keyLogin(1))
 
-	var ret paramsResult
+	var ret ecosystemParamsResult
 	require.NoError(t, sendGet(`ecosystemparams`, nil, &ret))
 
 	if len(ret.List) < 5 {
@@ -124,7 +124,7 @@ func TestSystemParams(t *testing.T) {
 		return
 	}
 
-	var ret paramsResult
+	var ret ecosystemParamsResult
 
 	err := sendGet(`systemparams`, nil, &ret)
 	if err != nil {
@@ -141,7 +141,7 @@ func TestSomeSystemParam(t *testing.T) {
 		return
 	}
 
-	var ret paramsResult
+	var ret ecosystemParamsResult
 
 	param := "gap_between_blocks"
 	err := sendGet(`systemparams/?names=`+param, nil, &ret)

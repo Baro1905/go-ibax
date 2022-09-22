@@ -5,10 +5,9 @@
 package random
 
 import (
+	"github.com/IBAX-io/go-ibax/packages/common/crypto"
 	"math/rand"
 	"time"
-
-	"github.com/IBAX-io/go-ibax/packages/common/crypto"
 )
 
 type Rand struct {
@@ -16,7 +15,7 @@ type Rand struct {
 }
 
 func (r *Rand) BytesSeed(b []byte) *rand.Rand {
-	seed := crypto.CalcChecksum(b)
+	seed, _ := crypto.CalcChecksum(b)
 	r.src.Seed(int64(seed))
 	return r.src
 }

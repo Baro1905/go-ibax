@@ -71,7 +71,7 @@ func SendRawRequest(rtype, url, auth string, form *url.Values) ([]byte, error) {
 	return data, nil
 }
 
-func SendRequest(rtype, url, auth string, form *url.Values, v any) error {
+func SendRequest(rtype, url, auth string, form *url.Values, v interface{}) error {
 	data, err := SendRawRequest(rtype, url, auth, form)
 	if err != nil {
 		return err
@@ -80,15 +80,15 @@ func SendRequest(rtype, url, auth string, form *url.Values, v any) error {
 	return json.Unmarshal(data, v)
 }
 
-func (connect *Connect) SendGet(url string, form *url.Values, v any) error {
+func (connect *Connect) SendGet(url string, form *url.Values, v interface{}) error {
 	return SendRequest("GET", connect.Root+url, connect.Auth, form, v)
 }
 
-func (connect *Connect) SendPost(url string, form *url.Values, v any) error {
+func (connect *Connect) SendPost(url string, form *url.Values, v interface{}) error {
 	return SendRequest("POST", connect.Root+url, connect.Auth, form, v)
 }
 
-func (connect *Connect) SendMultipart(url string, files map[string][]byte, v any) error {
+func (connect *Connect) SendMultipart(url string, files map[string][]byte, v interface{}) error {
 	body := new(bytes.Buffer)
 	writer := multipart.NewWriter(body)
 
@@ -214,7 +214,7 @@ func (connect *Connect) PostTxResult(name string, form *url.Values) (id int64, m
 	if err = connect.SendGet("contract/"+name, nil, &contract); err != nil {
 		return
 	}
-	params := make(map[string]any)
+	params := make(map[string]interface{})
 	for _, field := range contract.Fields {
 		name := field.Name
 		value := form.Get(name)
@@ -231,11 +231,11 @@ func (connect *Connect) PostTxResult(name string, form *url.Values) (id int64, m
 		case "float":
 			params[name], err = strconv.ParseFloat(value, 64)
 		case "array":
-			var v any
+			var v interface{}
 			err = json.Unmarshal([]byte(value), &v)
 			params[name] = v
 		case "map":
-			var v map[string]any
+			var v map[string]interface{}
 			err = json.Unmarshal([]byte(value), &v)
 			params[name] = v
 		case "string", "money":
@@ -258,11 +258,11 @@ func (connect *Connect) PostTxResult(name string, form *url.Values) (id int64, m
 		txTime = converter.StrToInt64(newTime)
 	}
 
-	data, txhash, err := transaction.NewTransactionInProc(types.SmartTransaction{
+	data, txhash, err := transaction.NewTransaction(types.SmartContract{
 		Header: &types.Header{
 			ID:          int(contract.ID),
-			EcosystemID: 1,
 			Time:        txTime,
+			EcosystemID: 1,
 			KeyID:       crypto.Address(publicKey),
 			NetworkID:   conf.Config.LocalConf.NetworkID,
 		},

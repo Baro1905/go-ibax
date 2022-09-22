@@ -74,15 +74,6 @@ const MaxTXAttempt = 10
 // ChainSize 1M = 1048576 byte
 const ChainSize = 1 << 20
 
-// DefaultTokenSymbol define default token symbol
-const DefaultTokenSymbol = "IBXC"
-
-// DefaultTokenName define default token name
-const DefaultTokenName = "IBAX Coin"
-
-// DefaultEcosystemName define default ecosystem name
-const DefaultEcosystemName = "platform ecosystem"
-
 // ApiPath is the beginning of the api url
 var ApiPath = `/api/v2/`
 
@@ -90,6 +81,36 @@ var ApiPath = `/api/v2/`
 var BuildInfo string
 
 const (
+	// DefaultConfigFile name of config file (toml format)
+	DefaultConfigFile = "config.toml"
+
+	// DefaultWorkdirName name of working directory
+	DefaultWorkdirName = "data"
+
+	// DefaultPidFilename is default filename of pid file
+	DefaultPidFilename = "go-ibax.pid"
+
+	// DefaultLockFilename is default filename of lock file
+	DefaultLockFilename = "go-ibax.lock"
+
+	// FirstBlockFilename name of first block binary file
+	FirstBlockFilename = "1block"
+
+	// PrivateKeyFilename name of wallet private key file
+	PrivateKeyFilename = "PrivateKey"
+
+	// PublicKeyFilename name of wallet public key file
+	PublicKeyFilename = "PublicKey"
+
+	// NodePrivateKeyFilename name of node private key file
+	NodePrivateKeyFilename = "NodePrivateKey"
+
+	// NodePublicKeyFilename name of node public key file
+	NodePublicKeyFilename = "NodePublicKey"
+
+	// KeyIDFilename generated KeyID
+	KeyIDFilename = "KeyID"
+
 	// RollbackResultFilename rollback result file
 	RollbackResultFilename = "rollback_result"
 
@@ -105,7 +126,10 @@ const (
 	// TxRequestExpire is expiration time for request of transaction
 	TxRequestExpire = 1 * time.Minute
 
-	// DefaultCLB always is 1
+	// DefaultTempDirName is default name of temporary directory
+	DefaultTempDirName = "ibax-temp"
+
+	// DefaultCLB allways is 1
 	DefaultCLB = 1
 
 	// MoneyLength is the maximum number of digits in money value
@@ -129,9 +153,6 @@ const (
 
 	NoneCLB     = "none"
 	DBFindLimit = 10000
-
-	HonorNodeMode     = 1
-	CandidateNodeMode = 2
 )
 
 const (
@@ -143,6 +164,6 @@ func Version() string {
 	return strings.TrimSpace(strings.Join([]string{VERSION, BuildInfo}, " "))
 }
 
-func SetSavePointMarkBlock(idTx string) string {
-	return fmt.Sprintf("\"%s-%s\";", SavePointMarkBlock, idTx)
+func SetSavePointMarkBlock(idTx int) string {
+	return fmt.Sprintf("\"%s-%d\";", SavePointMarkBlock, idTx)
 }

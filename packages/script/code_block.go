@@ -27,53 +27,35 @@ type CodeBlock struct {
 	Objects  map[string]*ObjInfo
 	Type     ObjectType
 	Owner    *OwnerInfo
-	Info     isCodeBlockInfo
+	Info     *codeBlockInfo
 	Parent   *CodeBlock
 	Vars     []reflect.Type
 	Code     ByteCodes
 	Children CodeBlocks
 }
 
-type isCodeBlockInfo interface {
-	isCodeBlockInfo()
-}
+type codeBlockInfo struct{ i interface{} }
 
-func (*FuncInfo) isCodeBlockInfo()     {}
-func (*ContractInfo) isCodeBlockInfo() {}
-
-func (m *CodeBlock) GetInfo() isCodeBlockInfo {
-	if m != nil {
-		return m.Info
-	}
-	return nil
-}
-
-func (m *CodeBlock) GetFuncInfo() *FuncInfo {
-	if x, ok := m.GetInfo().(*FuncInfo); ok {
-		return x
-	}
-	return nil
-}
-
-func (m *CodeBlock) GetContractInfo() *ContractInfo {
-	if x, ok := m.GetInfo().(*ContractInfo); ok {
-		return x
-	}
-	return nil
+func newCodeBlockInfo(i interface{}) *codeBlockInfo  { return &codeBlockInfo{i: i} }
+func (i *codeBlockInfo) FuncInfo() *FuncInfo         { return i.i.(*FuncInfo) }
+func (i *codeBlockInfo) Uint32() uint32              { return i.i.(uint32) }
+func (i *codeBlockInfo) ContractInfo() *ContractInfo { return i.i.(*ContractInfo) }
+func (i *codeBlockInfo) IsContractInfo() (*ContractInfo, bool) {
+	v, ok := i.i.(*ContractInfo)
+	return v, ok
 }
 
 // ByteCode stores a command and an additional parameter.
 type ByteCode struct {
-	Cmd    uint16
-	Line   uint16
-	Lexeme Lexeme
-	Value  any
+	Cmd   uint16
+	Line  uint16
+	Value interface{}
 }
 
 // CodeBlocks is a slice of blocks
 type CodeBlocks []*CodeBlock
 
-func (bs *CodeBlocks) push(x any) {
+func (bs *CodeBlocks) push(x interface{}) {
 	*bs = append(*bs, x.(*CodeBlock))
 }
 
@@ -95,7 +77,7 @@ func (bs *CodeBlocks) get(idx int) *CodeBlock {
 // ByteCodes is the slice of ByteCode items
 type ByteCodes []*ByteCode
 
-func (bs *ByteCodes) push(x any) {
+func (bs *ByteCodes) push(x interface{}) {
 	*bs = append(*bs, x.(*ByteCode))
 }
 
@@ -107,7 +89,7 @@ func (bs *ByteCodes) peek() *ByteCode {
 	return (*bs)[bsLen-1]
 }
 
-func newByteCode(cmd uint16, line uint16, value any) *ByteCode {
+func newByteCode(cmd uint16, line uint16, value interface{}) *ByteCode {
 	return &ByteCode{Cmd: cmd, Line: line, Value: value}
 }
 
@@ -123,58 +105,16 @@ type OwnerInfo struct {
 // ObjInfo is the common object type
 type ObjInfo struct {
 	Type  ObjectType
-	Value isObjInfoValue
+	Value *objInfoValue
 }
 
-type isObjInfoValue interface {
-	isObjInfoValue()
-}
-type ObjInfo_Int struct {
-	Int int
-}
-type ObjInfo_Str struct {
-	Str string
-}
+type objInfoValue struct{ v interface{} }
 
-func (*CodeBlock) isObjInfoValue()   {}
-func (*ExtFuncInfo) isObjInfoValue() {}
-func (*ObjInfo_Int) isObjInfoValue() {}
-func (*ObjInfo_Str) isObjInfoValue() {}
-
-func (m *ObjInfo) GetValue() isObjInfoValue {
-	if m != nil {
-		return m.Value
-	}
-	return nil
-}
-
-func (m *ObjInfo) GetCodeBlock() *CodeBlock {
-	if x, ok := m.GetValue().(*CodeBlock); ok {
-		return x
-	}
-	return nil
-}
-
-func (m *ObjInfo) GetExtFuncInfo() *ExtFuncInfo {
-	if x, ok := m.GetValue().(*ExtFuncInfo); ok {
-		return x
-	}
-	return nil
-}
-
-func (m *ObjInfo) GetInt() int {
-	if x, ok := m.GetValue().(*ObjInfo_Int); ok {
-		return x.Int
-	}
-	return 0
-}
-
-func (m *ObjInfo) GetStr() string {
-	if x, ok := m.GetValue().(*ObjInfo_Str); ok {
-		return x.Str
-	}
-	return ""
-}
+func newObjInfoValue(v interface{}) *objInfoValue { return &objInfoValue{v: v} }
+func (i *objInfoValue) CodeBlock() *CodeBlock     { return i.v.(*CodeBlock) }
+func (i *objInfoValue) ExtFuncInfo() *ExtFuncInfo { return i.v.(*ExtFuncInfo) }
+func (i *objInfoValue) Int() int                  { return i.v.(int) }
+func (i *objInfoValue) String() string            { return i.v.(string) }
 
 func NewCodeBlock() *CodeBlock {
 	b := &CodeBlock{
@@ -210,7 +150,7 @@ func (b *CodeBlock) Extend(ext *ExtendData) {
 			for i := 0; i < fobj.NumOut(); i++ {
 				data.Results[i] = fobj.Out(i)
 			}
-			b.Objects[key] = &ObjInfo{Type: ObjectType_ExtFunc, Value: data}
+			b.Objects[key] = &ObjInfo{Type: ObjectType_ExtFunc, Value: newObjInfoValue(data)}
 		}
 	}
 }
@@ -237,15 +177,14 @@ func (block *CodeBlock) getObjByName(name string) (ret *ObjInfo) {
 		if ret.Type != ObjectType_Contract && ret.Type != ObjectType_Func {
 			return nil
 		}
-		block = ret.GetCodeBlock()
+		block = ret.Value.CodeBlock()
 	}
 	return
 }
 
 func (block *CodeBlock) parentContractCost() int64 {
 	var cost int64
-	parent := block.Parent.GetContractInfo()
-	if parent != nil {
+	if parent, ok := block.Parent.Info.IsContractInfo(); ok {
 		cost += int64(len(block.Parent.Objects) * CostCall)
 		cost += int64(len(parent.Settings) * CostCall)
 		if parent.Tx != nil {
@@ -266,16 +205,16 @@ func setWritable(block *CodeBlocks) {
 	for i := len(*block) - 1; i >= 0; i-- {
 		blockItem := (*block)[i]
 		if blockItem.Type == ObjectType_Func {
-			blockItem.GetFuncInfo().CanWrite = true
+			blockItem.Info.FuncInfo().CanWrite = true
 		}
 		if blockItem.Type == ObjectType_Contract {
-			blockItem.GetContractInfo().CanWrite = true
+			blockItem.Info.ContractInfo().CanWrite = true
 		}
 	}
 }
 func (ret *ObjInfo) getInParams() int {
 	if ret.Type == ObjectType_ExtFunc {
-		return len(ret.GetExtFuncInfo().Params)
+		return len(ret.Value.ExtFuncInfo().Params)
 	}
-	return len(ret.GetCodeBlock().GetFuncInfo().Params)
+	return len(ret.Value.CodeBlock().Info.FuncInfo().Params)
 }

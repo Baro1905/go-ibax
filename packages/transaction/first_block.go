@@ -7,13 +7,6 @@ package transaction
 import (
 	"bytes"
 	"strconv"
-	"time"
-
-	"github.com/IBAX-io/go-ibax/packages/migration"
-
-	"github.com/pkg/errors"
-
-	"github.com/vmihailenco/msgpack/v5"
 
 	"github.com/IBAX-io/go-ibax/packages/common/crypto"
 	"github.com/IBAX-io/go-ibax/packages/conf/syspar"
@@ -32,59 +25,33 @@ const (
 )
 
 // FirstBlockParser is parser wrapper
-type FirstBlockParser struct {
+type FirstBlockTransaction struct {
 	Logger        *log.Entry
 	DbTransaction *sqldb.DbTransaction
-	Data          *types.FirstBlock
-	Timestamp     int64
+	Data          types.FirstBlock
 	TxHash        []byte
 	Payload       []byte // transaction binary data
 }
 
-func (f *FirstBlockParser) txType() byte                { return f.Data.TxType() }
-func (f *FirstBlockParser) txHash() []byte              { return f.TxHash }
-func (f *FirstBlockParser) txPayload() []byte           { return f.Payload }
-func (f *FirstBlockParser) txTime() int64               { return f.Timestamp }
-func (f *FirstBlockParser) txKeyID() int64              { return f.Data.KeyID }
-func (f *FirstBlockParser) txExpedite() decimal.Decimal { return decimal.Decimal{} }
-func (s *FirstBlockParser) setTimestamp()               { s.Timestamp = time.Now().UnixMilli() }
+func (f *FirstBlockTransaction) txType() byte                { return types.FirstBlockTxType }
+func (f *FirstBlockTransaction) txHash() []byte              { return f.TxHash }
+func (f *FirstBlockTransaction) txPayload() []byte           { return f.Payload }
+func (f *FirstBlockTransaction) txTime() int64               { return int64(f.Data.Time) }
+func (f *FirstBlockTransaction) txKeyID() int64              { return f.Data.KeyID }
+func (f *FirstBlockTransaction) txExpedite() decimal.Decimal { return decimal.Decimal{} }
 
-func (f *FirstBlockParser) TxRollback() error                                      { return nil }
-func (f *FirstBlockParser) SysUpdateWorker(dbTx *sqldb.DbTransaction) error        { return nil }
-func (f *FirstBlockParser) SysTableColByteaWorker(dbTx *sqldb.DbTransaction) error { return nil }
-func (f *FirstBlockParser) FlushVM()                                               {}
+func (f *FirstBlockTransaction) Init(*Transaction) error { return nil }
 
-func (f *FirstBlockParser) Init(in *InToCxt) error {
-	f.Logger = log.WithFields(log.Fields{})
-	f.DbTransaction = in.DbTransaction
+func (f *FirstBlockTransaction) Validate() error {
 	return nil
 }
 
-func (f *FirstBlockParser) Validate() error {
-	return nil
-}
-
-func (f *FirstBlockParser) Action(in *InToCxt, out *OutCtx) (err error) {
-	if in.BlockHeader.BlockId > 1 {
-		return nil
-	}
+func (f *FirstBlockTransaction) Action(t *Transaction) error {
 	logger := f.Logger
 	data := f.Data
-	dbTx := in.DbTransaction
-	id := int64(0)
 	keyID := crypto.Address(data.PublicKey)
 	nodeKeyID := crypto.Address(data.NodePublicKey)
-	err = sqldb.ExecSchemaEcosystem(dbTx, migration.SqlData{
-		Ecosystem:   firstEcosystemID,
-		Wallet:      keyID,
-		Name:        consts.DefaultEcosystemName,
-		Founder:     keyID,
-		AppID:       firstAppID,
-		Account:     converter.AddressToString(keyID),
-		Digits:      consts.MoneyDigits,
-		TokenSymbol: consts.DefaultTokenSymbol,
-		TokenName:   consts.DefaultTokenName,
-	})
+	err := sqldb.ExecSchemaEcosystem(nil, firstEcosystemID, keyID, ``, keyID, firstAppID)
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("executing ecosystem schema")
 		return err
@@ -92,99 +59,77 @@ func (f *FirstBlockParser) Action(in *InToCxt, out *OutCtx) (err error) {
 
 	amount := decimal.New(consts.FounderAmount, int32(consts.MoneyDigits)).String()
 
-	taxes := &sqldb.PlatformParameter{Name: `taxes_wallet`}
-	if err = taxes.SaveArray(dbTx, [][]string{{"1", converter.Int64ToStr(keyID)}}); err != nil {
+	taxes := &sqldb.SystemParameter{Name: `taxes_wallet`}
+	if err = taxes.SaveArray([][]string{{"1", converter.Int64ToStr(keyID)}}); err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("saving taxes_wallet array")
 		return err
 	}
 
-	err = sqldb.GetDB(dbTx).Exec(`update "1_platform_parameters" SET value = ? where name = 'test'`, strconv.FormatInt(data.Test, 10)).Error
+	err = sqldb.GetDB(t.DbTransaction).Exec(`update "1_system_parameters" SET value = ? where name = 'test'`, strconv.FormatInt(data.Test, 10)).Error
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("updating test parameter")
 		return err
 	}
 
-	err = sqldb.GetDB(dbTx).Exec(`Update "1_platform_parameters" SET value = ? where name = 'private_blockchain'`, strconv.FormatUint(data.PrivateBlockchain, 10)).Error
+	err = sqldb.GetDB(t.DbTransaction).Exec(`Update "1_system_parameters" SET value = ? where name = 'private_blockchain'`, strconv.FormatUint(data.PrivateBlockchain, 10)).Error
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("updating private_blockchain")
 		return err
 	}
 
-	if err = syspar.SysUpdate(dbTx); err != nil {
+	if err = syspar.SysUpdate(t.DbTransaction); err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("updating syspar")
 		return err
 	}
 
-	err = sqldb.GetDB(dbTx).Exec(`insert into "1_keys" (id,account,pub,amount) values(?,?,?,?),(?,?,?,?)`,
-		keyID, converter.AddressToString(keyID), data.PublicKey, 0, nodeKeyID, converter.AddressToString(nodeKeyID), data.NodePublicKey, 0).Error
+	err = sqldb.GetDB(t.DbTransaction).Exec(`insert into "1_keys" (id,account,pub,amount) values(?,?,?,?),(?,?,?,?)`,
+		keyID, converter.AddressToString(keyID), data.PublicKey, amount, nodeKeyID, converter.AddressToString(nodeKeyID), data.NodePublicKey, 0).Error
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("inserting key")
 		return err
 	}
-
-	err = sqldb.GetDB(dbTx).Exec(`insert into "spent_info" (output_index,output_tx_hash,output_key_id,output_value,ecosystem,block_id) values(?,?,?,?,?,?)`,
-		0, crypto.DoubleHash([]byte(`0`)), keyID, amount, 1, 1).Error
-	if err != nil {
-		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("inserting spent info")
-		return err
-	}
-
-	id, err = dbTx.GetNextID("1_pages")
+	id, err := t.DbTransaction.GetNextID("1_pages")
 	if err != nil {
 		return err
 	}
-	err = sqldb.GetDB(dbTx).Exec(`insert into "1_pages" (id,name,menu,value,conditions) values(?, 'default_page',
+	err = sqldb.GetDB(t.DbTransaction).Exec(`insert into "1_pages" (id,name,menu,value,conditions) values(?, 'default_page',
 		  'default_menu', ?, 'ContractConditions("@1DeveloperCondition")')`,
 		id, syspar.SysString(`default_ecosystem_page`)).Error
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("inserting default page")
 		return err
 	}
-	id, err = dbTx.GetNextID("1_menu")
+	id, err = t.DbTransaction.GetNextID("1_menu")
 	if err != nil {
 		return err
 	}
-	err = sqldb.GetDB(dbTx).Exec(`insert into "1_menu" (id,name,value,title,conditions) values(?, 'default_menu', ?, ?, 'ContractAccess("@1EditMenu")')`,
+	err = sqldb.GetDB(t.DbTransaction).Exec(`insert into "1_menu" (id,name,value,title,conditions) values(?, 'default_menu', ?, ?, 'ContractAccess("@1EditMenu")')`,
 		id, syspar.SysString(`default_ecosystem_menu`), `default`).Error
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("inserting default menu")
 		return err
 	}
-	err = smart.LoadContract(dbTx, 1)
+	err = smart.LoadContract(t.DbTransaction, 1)
 	if err != nil {
 		return err
 	}
-	if err := syspar.SysTableColType(dbTx); err != nil {
+	if err := syspar.SysTableColType(t.DbTransaction); err != nil {
 		return err
 	}
-	syspar.SetFirstBlockData(data)
-	syspar.SetFirstBlockTimestamp(time.UnixMilli(f.Timestamp).Unix())
+	syspar.SetFirstBlockData(&data)
 	return nil
 }
 
-func (s *FirstBlockParser) BinMarshal(data *types.FirstBlock) ([]byte, error) {
-	s.Data = data
-	var buf []byte
-	var err error
-	buf, err = msgpack.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-	s.setTimestamp()
-	s.Payload = buf
-	s.TxHash = crypto.DoubleHash(s.Payload)
-	buf, err = msgpack.Marshal(s)
-	if err != nil {
-		return nil, err
-	}
-	buf = append([]byte{s.txType()}, buf...)
-	return buf, nil
+func (f *FirstBlockTransaction) TxRollback() error {
+	return nil
 }
 
-func (f *FirstBlockParser) Unmarshal(buffer *bytes.Buffer) error {
+func (f *FirstBlockTransaction) Unmarshal(buffer *bytes.Buffer) error {
 	buffer.UnreadByte()
-	if err := msgpack.Unmarshal(buffer.Bytes()[1:], f); err != nil {
-		return errors.Wrap(err, "first block Unmarshal err")
+	f.Payload = buffer.Bytes()
+	f.TxHash = crypto.DoubleHash(f.Payload)
+	if err := converter.BinUnmarshal(&f.Payload, &f.Data); err != nil {
+		return err
 	}
 	return nil
 }

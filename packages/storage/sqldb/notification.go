@@ -22,11 +22,11 @@ const (
 type Notification struct {
 	ecosystem           int64
 	ID                  int64  `gorm:"primary_key;not null"`
-	Recipient           string `gorm:"type:jsonb"`
-	Sender              string `gorm:"type:jsonb"`
-	Notification        string `gorm:"type:jsonb"`
-	PageParams          string `gorm:"type:jsonb"`
-	ProcessingInfo      string `gorm:"type:jsonb"`
+	Recipient           string `gorm:"type:jsonb`
+	Sender              string `gorm:"type:jsonb`
+	Notification        string `gorm:"type:jsonb`
+	PageParams          string `gorm:"type:jsonb`
+	ProcessingInfo      string `gorm:"type:jsonb`
 	PageName            string `gorm:"size:255"`
 	DateCreated         int64
 	DateStartProcessing int64
@@ -83,7 +83,7 @@ func GetNotificationsCount(ecosystemID int64, accounts []string) ([]Notification
 	return result, nil
 }
 
-func getNotificationCountFilter(users []int64, ecosystemID int64) (filter string, params []any) {
+func getNotificationCountFilter(users []int64, ecosystemID int64) (filter string, params []interface{}) {
 	filter = fmt.Sprintf(` WHERE closed = 0 and ecosystem = '%d' `, ecosystemID)
 
 	if len(users) > 0 {

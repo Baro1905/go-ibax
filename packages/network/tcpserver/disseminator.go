@@ -55,7 +55,7 @@ func Disseminator(rw io.ReadWriter) error {
 	log.Debug("honorNodeID", honorNodeID)
 	n, err := syspar.GetNodeByPosition(honorNodeID)
 	if err != nil {
-		log.WithError(err).Error("on getting node by position")
+		log.WithFields(log.Fields{"error": err}).Error("on getting node by position")
 		return err
 	}
 
@@ -71,7 +71,7 @@ func Disseminator(rw io.ReadWriter) error {
 		} else {
 			err := processBlock(buf, honorNodeID)
 			if err != nil {
-				log.WithError(err).Error("on process block")
+				log.WithFields(log.Fields{"error": err}).Error("on process block")
 				return err
 			}
 		}
@@ -80,14 +80,14 @@ func Disseminator(rw io.ReadWriter) error {
 	// get unknown transactions from received packet
 	needTx, err := getUnknownTransactions(buf)
 	if err != nil {
-		log.WithError(err).Error("on getting unknown txes")
+		log.WithFields(log.Fields{"error": err}).Error("on getting unknown txes")
 		return err
 	}
 
 	// send the list of transactions which we want to get
 	err = (&network.DisHashResponse{Data: needTx}).Write(rw)
 	if err != nil {
-		log.WithError(err).Error("on sending neeeded tx list")
+		log.WithFields(log.Fields{"error": err}).Error("on sending neeeded tx list")
 		return err
 	}
 
@@ -98,7 +98,7 @@ func Disseminator(rw io.ReadWriter) error {
 	// get this new transactions
 	txBodies, err := resieveTxBodies(rw)
 	if err != nil {
-		log.WithError(err).Error("on reading needed txes from disseminator")
+		log.WithFields(log.Fields{"error": err}).Error("on reading needed txes from disseminator")
 		return err
 	}
 
@@ -256,7 +256,7 @@ func saveNewTransactions(binaryTxs []byte) error {
 			log.WithFields(log.Fields{"type": consts.UnmarshallingError, "error": err}).Error("unmarshalling transaction")
 			return err
 		}
-		queueTxs = append(queueTxs, &sqldb.QueueTx{Hash: rtx.Hash(), Data: txBinData, Expedite: rtx.Expedite(), Time: rtx.Timestamp(), FromGate: 1})
+		queueTxs = append(queueTxs, &sqldb.QueueTx{Hash: rtx.TxHash(), Data: txBinData, Expedite: rtx.TxExpedite(), Time: rtx.TxTime(), FromGate: 1})
 	}
 	if err := sqldb.GetDB(nil).Clauses(clause.OnConflict{DoNothing: true}).Create(&queueTxs).Error; err != nil {
 		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("error creating QueueTx")
