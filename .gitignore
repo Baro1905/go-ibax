@@ -126,7 +126,3 @@ packages/api/key*
 *.lock
 *.pid
 initDatabase.txt
-.env
-docker-compose.yml
-Dockerfile
-Dockerfile_src

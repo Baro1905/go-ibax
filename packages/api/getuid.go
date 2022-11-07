@@ -28,21 +28,17 @@ type getUIDResult struct {
 	KeyID       string `json:"key_id,omitempty"`
 	Address     string `json:"address,omitempty"`
 	NetworkID   string `json:"network_id,omitempty"`
-	Cryptoer    string `json:"cryptoer"`
-	Hasher      string `json:"hasher"`
 }
 
 func getUIDHandler(w http.ResponseWriter, r *http.Request) {
 	result := new(getUIDResult)
 	result.NetworkID = converter.Int64ToStr(conf.Config.LocalConf.NetworkID)
 	token := getToken(r)
-	result.Cryptoer, result.Hasher = conf.Config.CryptoSettings.Cryptoer, conf.Config.CryptoSettings.Hasher
 	if token != nil {
 		if claims, ok := token.Claims.(*JWTClaims); ok && len(claims.KeyID) > 0 {
 			result.EcosystemID = claims.EcosystemID
 			result.Expire = claims.ExpiresAt.Sub(time.Now()).String()
 			result.KeyID = claims.KeyID
-			result.Address = converter.AddressToString(converter.StrToInt64(claims.KeyID))
 			jsonResponse(w, result)
 			return
 		}

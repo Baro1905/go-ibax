@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/IBAX-io/go-ibax/packages/common/crypto"
 	"github.com/IBAX-io/go-ibax/packages/script"
 
 	"github.com/IBAX-io/go-ibax/packages/conf/syspar"
@@ -34,8 +33,8 @@ import (
 
 // Composite represents a composite contract
 type Composite struct {
-	Name string `json:"name"`
-	Data any    `json:"data,omitempty"`
+	Name string      `json:"name"`
+	Data interface{} `json:"data,omitempty"`
 }
 
 // Action describes a button action
@@ -59,7 +58,6 @@ func init() {
 	funcs[`Lower`] = tplFunc{lowerTag, defaultTag, `lower`, `Text`}
 	funcs[`AddToolButton`] = tplFunc{defaultTailTag, defaultTailTag, `addtoolbutton`, `Title,Icon,Page,PageParams`}
 	funcs[`Address`] = tplFunc{addressTag, defaultTag, `address`, `Wallet`}
-	funcs[`PubToID`] = tplFunc{pubToIdTag, defaultTag, `pubtoid`, `Pub`}
 	funcs[`AddressToId`] = tplFunc{addressIDTag, defaultTag, `addresstoid`, `Wallet`}
 	funcs[`AppParam`] = tplFunc{appparTag, defaultTag, `apppar`, `Name,App,Index,Source,Ecosystem`}
 	funcs[`Calculate`] = tplFunc{calculateTag, defaultTag, `calculate`, `Exp,Type,Prec`}
@@ -312,25 +310,12 @@ func addressTag(par parFunc) string {
 	return converter.AddressToString(id)
 }
 
-func pubToIdTag(par parFunc) string {
-	hexkey := (*par.Pars)[`Pub`]
-	if len(hexkey) == 0 {
-		return `0`
-	}
-	idval := processToText(par, macro(hexkey, par.Workspace.Vars))
-	pubkey, err := crypto.HexToPub(idval)
-	if err != nil {
-		return `0`
-	}
-	return converter.Int64ToStr(crypto.Address(pubkey))
-}
-
 func addressIDTag(par parFunc) string {
 	address := (*par.Pars)[`Wallet`]
 	if len(address) == 0 {
 		return getVar(par.Workspace, `key_id`)
 	}
-	id := converter.AddressToID(processToText(par, macro(address, par.Workspace.Vars)))
+	id := smart.AddressToID(processToText(par, macro(address, par.Workspace.Vars)))
 	if id == 0 {
 		return `0`
 	}
@@ -351,7 +336,7 @@ func paramToSource(par parFunc, val string) string {
 			converter.StrToInt(getVar(par.Workspace, `ecosystem_id`)), getVar(par.Workspace, `lang`))
 		data = append(data, []string{converter.IntToStr(key + 1), item})
 	}
-	node := node{Tag: `data`, Attr: map[string]any{`columns`: &cols, `types`: &types,
+	node := node{Tag: `data`, Attr: map[string]interface{}{`columns`: &cols, `types`: &types,
 		`data`: &data, `source`: (*par.Pars)[`Source`]}}
 	par.Owner.Children = append(par.Owner.Children, &node)
 
@@ -479,8 +464,8 @@ func actionTag(par parFunc) string {
 	var params map[string]string
 	if v, ok := par.Node.Attr["params"]; ok {
 		params = make(map[string]string)
-		for key, val := range v.(map[string]any) {
-			if imap, ok := val.(map[string]any); ok {
+		for key, val := range v.(map[string]interface{}) {
+			if imap, ok := val.(map[string]interface{}); ok {
 				params[key] = macro(fmt.Sprint(imap["text"]), par.Workspace.Vars)
 			} else {
 				params[key] = macro(fmt.Sprint(val), par.Workspace.Vars)
@@ -594,7 +579,7 @@ func dataTag(par parFunc) string {
 
 func dbfindTag(par parFunc) string {
 	var (
-		inColumns any
+		inColumns interface{}
 		columns   []string
 		state     int64
 		err       error
@@ -643,7 +628,7 @@ func dbfindTag(par parFunc) string {
 				} else {
 					return errWhere.Error()
 				}
-			case map[string]any:
+			case map[string]interface{}:
 				where, err = qb.GetWhere(types.LoadMap(v))
 				if err != nil {
 					return err.Error()
@@ -776,7 +761,7 @@ func dbfindTag(par parFunc) string {
 	if len(where) > 0 {
 		where = ` where ` + where
 	}
-	list, err := sc.DbTransaction.GetAllTransaction(`select `+strings.Join(queryColumns, `, `)+` from "`+tblname+`"`+
+	list, err := sc.DbTransaction.GetAll(`select `+strings.Join(queryColumns, `, `)+` from "`+tblname+`"`+
 		where+order+offset, limit)
 	if err != nil {
 		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("getting all from db")
@@ -860,7 +845,7 @@ func dbfindTag(par parFunc) string {
 		data = append(data, row)
 	}
 	if perm != nil && len(perm[`filter`]) > 0 {
-		result := make([]any, len(data))
+		result := make([]interface{}, len(data))
 		for i, item := range data {
 			row := make(map[string]string)
 			for j, col := range columnNames {
@@ -869,11 +854,11 @@ func dbfindTag(par parFunc) string {
 			result[i] = reflect.ValueOf(row).Interface()
 		}
 		fltResult, err := script.VMEvalIf(sc.VM, perm[`filter`], uint32(sc.TxSmart.EcosystemID),
-			map[string]any{
+			map[string]interface{}{
 				`data`:         result,
 				`ecosystem_id`: sc.TxSmart.EcosystemID,
 				`key_id`:       sc.TxSmart.KeyID, `sc`: sc,
-				`block_time`: 0, `time`: sc.Timestamp})
+				`block_time`: 0, `time`: sc.TxSmart.Time})
 		if err != nil || !fltResult {
 			return `Access denied`
 		}
@@ -917,9 +902,9 @@ func errredirTag(par parFunc) string {
 		return ``
 	}
 	if par.Owner.Attr[`errredirect`] == nil {
-		par.Owner.Attr[`errredirect`] = make(map[string]map[string]any)
+		par.Owner.Attr[`errredirect`] = make(map[string]map[string]interface{})
 	}
-	par.Owner.Attr[`errredirect`].(map[string]map[string]any)[(*par.Pars)[`ErrorID`]] =
+	par.Owner.Attr[`errredirect`].(map[string]map[string]interface{})[(*par.Pars)[`ErrorID`]] =
 		par.Node.Attr
 	return ``
 }
@@ -1128,7 +1113,7 @@ func buttonTag(par parFunc) string {
 	if par.Node.Attr[`composites`] != nil {
 		composites := make([]Composite, 0)
 		for i, name := range par.Node.Attr[`composites`].([]string) {
-			var data any
+			var data interface{}
 			input := par.Node.Attr[`compositedata`].([]string)[i]
 			if len(input) > 0 {
 				if err := json.Unmarshal([]byte(input), &data); err != nil {
@@ -1300,7 +1285,7 @@ func jsontosourceTag(par parFunc) string {
 	data := make([][]string, 0, 16)
 	cols := []string{prefix + `key`, prefix + `value`}
 	types := []string{`text`, `text`}
-	var out map[string]any
+	var out map[string]interface{}
 	dataVal := macro((*par.Pars)[`Data`], par.Workspace.Vars)
 	if len(dataVal) > 0 {
 		json.Unmarshal([]byte(macro((*par.Pars)[`Data`], par.Workspace.Vars)), &out)
@@ -1311,7 +1296,7 @@ func jsontosourceTag(par parFunc) string {
 		}
 		var value string
 		switch v := item.(type) {
-		case map[string]any:
+		case map[string]interface{}:
 			var keys, values []string
 			for k := range v {
 				keys = append(keys, k)

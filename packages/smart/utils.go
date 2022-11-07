@@ -5,11 +5,8 @@
 package smart
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-
-	"github.com/pkg/errors"
 
 	"github.com/IBAX-io/go-ibax/packages/conf/syspar"
 	"github.com/IBAX-io/go-ibax/packages/consts"
@@ -27,7 +24,7 @@ func logError(err error, errType string, comment string) error {
 	return err
 }
 
-func logErrorf(pattern string, param any, errType string, comment string) error {
+func logErrorf(pattern string, param interface{}, errType string, comment string) error {
 	err := fmt.Errorf(pattern, param)
 	log.WithFields(log.Fields{"type": errType, "error": err}).Error(comment)
 	return err
@@ -37,7 +34,7 @@ func logErrorShort(err error, errType string) error {
 	return logError(err, errType, err.Error())
 }
 
-func logErrorfShort(pattern string, param any, errType string) error {
+func logErrorfShort(pattern string, param interface{}, errType string) error {
 	return logErrorShort(fmt.Errorf(pattern, param), errType)
 }
 
@@ -50,19 +47,17 @@ func logErrorDB(err error, comment string) error {
 	return logError(err, consts.DBError, comment)
 }
 
-func unmarshalJSON(input []byte, v any, comment string) (err error) {
-	d := json.NewDecoder(bytes.NewReader(input))
-	d.UseNumber()
-	if err = d.Decode(&v); err != nil {
-		return errors.Wrap(err, comment)
+func unmarshalJSON(input []byte, v interface{}, comment string) (err error) {
+	if err = json.Unmarshal(input, v); err != nil {
+		return logErrorValue(err, consts.JSONUnmarshallError, comment, string(input))
 	}
 	return nil
 }
 
-func marshalJSON(v any, comment string) (out []byte, err error) {
+func marshalJSON(v interface{}, comment string) (out []byte, err error) {
 	out, err = json.Marshal(v)
 	if err != nil {
-		return nil, errors.Wrap(err, comment)
+		logError(err, consts.JSONMarshallError, comment)
 	}
 	return
 }
@@ -78,11 +73,11 @@ func validateAccess(sc *SmartContract, funcName string) error {
 	return nil
 }
 
-func FillTxData(fieldInfos []*script.FieldInfo, params map[string]any) (map[string]any, error) {
-	txData := make(map[string]any)
+func FillTxData(fieldInfos []*script.FieldInfo, params map[string]interface{}) (map[string]interface{}, error) {
+	txData := make(map[string]interface{})
 	for _, fitem := range fieldInfos {
 		var (
-			v     any
+			v     interface{}
 			ok    bool
 			err   error
 			index = fitem.Name
@@ -90,7 +85,7 @@ func FillTxData(fieldInfos []*script.FieldInfo, params map[string]any) (map[stri
 
 		if _, ok := params[index]; !ok {
 			if fitem.ContainsTag(script.TagOptional) {
-				txData[index] = script.GetFieldDefaultValue(fitem.Original)
+				txData[index] = getFieldDefaultValue(fitem.Original)
 				continue
 			}
 			return nil, fmt.Errorf(eParamNotFound, index)
@@ -114,32 +109,7 @@ func FillTxData(fieldInfos []*script.FieldInfo, params map[string]any) (map[stri
 				err = fmt.Errorf("invalid float type")
 				break
 			}
-		case script.DtInt:
-			switch t := params[index].(type) {
-			case int:
-				v = int64(t)
-			case int8:
-				v = int64(t)
-			case int16:
-				v = int64(t)
-			case int32:
-				v = int64(t)
-			case int64:
-				v = t
-			case uint:
-				v = int64(t)
-			case uint8:
-				v = int64(t)
-			case uint16:
-				v = int64(t)
-			case uint32:
-				v = int64(t)
-			case uint64:
-				v = int64(t)
-			default:
-				err = fmt.Errorf("invalid int type")
-			}
-		case script.DtAddress:
+		case script.DtInt, script.DtAddress:
 			switch t := params[index].(type) {
 			case int64:
 				v = t
@@ -161,7 +131,7 @@ func FillTxData(fieldInfos []*script.FieldInfo, params map[string]any) (map[stri
 			if v.(decimal.Decimal).LessThan(decimal.New(1, 0)) ||
 				v.(decimal.Decimal).
 					Mod(decimal.New(1, 0)).
-					GreaterThan(decimal.Zero) {
+					GreaterThan(decimal.New(0, 0)) {
 				err = fmt.Errorf("inconsistent with the smallest reference unit and its integer multiples")
 				break
 			}
@@ -176,34 +146,34 @@ func FillTxData(fieldInfos []*script.FieldInfo, params map[string]any) (map[stri
 				break
 			}
 		case script.DtArray:
-			if v, ok = params[index].([]any); !ok {
+			if v, ok = params[index].([]interface{}); !ok {
 				err = fmt.Errorf("invalid array type")
 				break
 			}
-			for i, subv := range v.([]any) {
+			for i, subv := range v.([]interface{}) {
 				switch val := subv.(type) {
-				case map[any]any:
-					imap := make(map[string]any)
+				case map[interface{}]interface{}:
+					imap := make(map[string]interface{})
 					for ikey, ival := range val {
 						imap[fmt.Sprint(ikey)] = ival
 					}
-					v.([]any)[i] = types.LoadMap(imap)
+					v.([]interface{})[i] = types.LoadMap(imap)
 				}
 			}
 		case script.DtMap:
-			var val map[any]any
-			if val, ok = params[index].(map[any]any); !ok {
+			var val map[interface{}]interface{}
+			if val, ok = params[index].(map[interface{}]interface{}); !ok {
 				err = fmt.Errorf("invalid map type")
 				break
 			}
-			imap := make(map[string]any)
+			imap := make(map[string]interface{})
 			for ikey, ival := range val {
 				imap[fmt.Sprint(ikey)] = ival
 			}
 			v = types.LoadMap(imap)
 		case script.DtFile:
-			var val map[string]any
-			if val, ok = params[index].(map[string]any); !ok {
+			var val map[string]interface{}
+			if val, ok = params[index].(map[string]interface{}); !ok {
 				err = fmt.Errorf("invalid file type")
 				break
 			}
@@ -227,4 +197,28 @@ func FillTxData(fieldInfos []*script.FieldInfo, params map[string]any) (map[stri
 	}
 
 	return txData, nil
+}
+
+func getFieldDefaultValue(fieldType uint32) interface{} {
+	switch fieldType {
+	case script.DtBool:
+		return false
+	case script.DtFloat:
+		return float64(0)
+	case script.DtInt, script.DtAddress:
+		return int64(0)
+	case script.DtMoney:
+		return decimal.New(0, consts.MoneyDigits)
+	case script.DtString:
+		return ""
+	case script.DtBytes:
+		return []byte{}
+	case script.DtArray:
+		return []interface{}{}
+	case script.DtMap:
+		return types.NewMap()
+	case script.DtFile:
+		return types.NewFile()
+	}
+	return nil
 }

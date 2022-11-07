@@ -20,7 +20,7 @@ import (
 )
 
 // ToBlockID rollbacks blocks till blockID
-func ToBlockID(blockID int64, dbTx *sqldb.DbTransaction, logger *log.Entry) error {
+func ToBlockID(blockID int64, dbTransaction *sqldb.DbTransaction, logger *log.Entry) error {
 	_, err := sqldb.MarkVerifiedAndNotUsedTransactionsUnverified()
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("marking verified and not used transactions unverified")
@@ -55,23 +55,23 @@ func ToBlockID(blockID int64, dbTx *sqldb.DbTransaction, logger *log.Entry) erro
 		return err
 	}
 
-	header, err := types.ParseBlockHeader(bytes.NewBuffer(block.Data), syspar.GetMaxBlockSize())
+	header, _, err := types.ParseBlockHeader(bytes.NewBuffer(block.Data), syspar.GetMaxBlockSize())
 	if err != nil {
 		return err
 	}
 
 	ib := &sqldb.InfoBlock{
 		Hash:           block.Hash,
-		BlockID:        header.BlockId,
-		Time:           header.Timestamp,
-		EcosystemID:    header.EcosystemId,
-		KeyID:          header.KeyId,
+		BlockID:        header.BlockID,
+		Time:           header.Time,
+		EcosystemID:    header.EcosystemID,
+		KeyID:          header.KeyID,
 		NodePosition:   converter.Int64ToStr(header.NodePosition),
-		CurrentVersion: strconv.Itoa(int(header.Version)),
+		CurrentVersion: strconv.Itoa(header.Version),
 		RollbacksHash:  block.RollbacksHash,
 	}
 
-	err = ib.Update(dbTx)
+	err = ib.Update(dbTransaction)
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("updating info block")
 		return err

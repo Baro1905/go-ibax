@@ -16,13 +16,13 @@ type Contract struct {
 	TxGovAccount  int64   // state wallet
 	Rate          float64 // money rate
 	TableAccounts string
-	StackCont     []any // Stack of called contracts
-	Extend        map[string]any
+	StackCont     []interface{} // Stack of called contracts
+	Extend        map[string]interface{}
 	Block         *script.CodeBlock
 }
 
 func (c *Contract) Info() *script.ContractInfo {
-	return c.Block.GetContractInfo()
+	return c.Block.Info.ContractInfo()
 }
 
 // LoadContracts reads and compiles contracts from smart_contracts tables
@@ -72,7 +72,7 @@ func VMGetContract(vm *script.VM, name string, state uint32) *Contract {
 	obj, ok := vm.Objects[name]
 
 	if ok && obj.Type == script.ObjectType_Contract {
-		return &Contract{Name: name, Block: obj.GetCodeBlock()}
+		return &Contract{Name: name, Block: obj.Value.CodeBlock()}
 	}
 	return nil
 }
@@ -90,10 +90,10 @@ func VMGetContractByID(vm *script.VM, id int32) *Contract {
 	if vm.Children[idcont] == nil || vm.Children[idcont].Type != script.ObjectType_Contract {
 		return nil
 	}
-	if tableID > 0 && vm.Children[idcont].GetContractInfo().Owner.TableID != tableID {
+	if tableID > 0 && vm.Children[idcont].Info.ContractInfo().Owner.TableID != tableID {
 		return nil
 	}
-	return &Contract{Name: vm.Children[idcont].GetContractInfo().Name,
+	return &Contract{Name: vm.Children[idcont].Info.ContractInfo().Name,
 		Block: vm.Children[idcont]}
 }
 
@@ -115,7 +115,7 @@ func GetContractByID(id int32) *Contract {
 // GetFunc returns the block of the specified function in the contract
 func (contract *Contract) GetFunc(name string) *script.CodeBlock {
 	if block, ok := (*contract).Block.Objects[name]; ok && block.Type == script.ObjectType_Func {
-		return block.GetCodeBlock()
+		return block.Value.CodeBlock()
 	}
 	return nil
 }

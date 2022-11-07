@@ -65,21 +65,6 @@ func HandleTCPRequest(rw net.Conn) {
 
 	case network.RequestTypeMaxBlock:
 		response, err = MaxBlock()
-
-	case network.RequestTypeVoting:
-		req := &network.CandidateNodeVotingRequest{}
-		if err = req.Read(rw); err == nil {
-			response, err = CandidateNodeVoting(req)
-		}
-	case network.RequestSyncMatchineState:
-		req := &network.BroadcastNodeConnInfoRequest{}
-		if err = req.Read(rw); err == nil {
-			_, err = SyncMatchineStateRes(req)
-			if err != nil {
-				log.WithFields(log.Fields{"type": "SyncMatchineStateRes", "error": err}).Error("SyncMatchineStateRes hour candidate voting")
-			}
-			return
-		}
 	}
 
 	if err != nil || response == nil {

@@ -9,8 +9,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/IBAX-io/go-ibax/packages/pbgo"
 	"gorm.io/gorm"
+
+	"github.com/IBAX-io/go-ibax/packages/conf"
 )
 
 // TransactionStatus is model
@@ -40,45 +41,56 @@ func (ts *TransactionStatus) Get(transactionHash []byte) (bool, error) {
 }
 
 // UpdateBlockID is updating block id
-func (ts *TransactionStatus) UpdateBlockID(dbTx *DbTransaction, newBlockID int64, transactionHash []byte) error {
-	return GetDB(dbTx).Model(&TransactionStatus{}).Where("hash = ?", transactionHash).Update("block_id", newBlockID).Error
+func (ts *TransactionStatus) UpdateBlockID(transaction *DbTransaction, newBlockID int64, transactionHash []byte) error {
+	return GetDB(transaction).Model(&TransactionStatus{}).Where("hash = ?", transactionHash).Update("block_id", newBlockID).Error
 }
 
-func UpdateBlockMsgBatches(dbTx *gorm.DB, newBlockID int64, updBlockMsg []*pbgo.TxResult) error {
+type updateBlockMsg struct {
+	Hash []byte
+	Msg  string
+}
+
+var updBlockMsg []updateBlockMsg
+
+// SetTransactionStatusBlockMsg is updating block msg
+func SetTransactionStatusBlockMsg(transaction *DbTransaction, newBlockID int64, msg string, transactionHash []byte) error {
+	if len(msg) > 255 {
+		msg = msg[:255]
+	}
+	if !conf.Config.IsCLBMaster() {
+		updBlockMsg = append(updBlockMsg, updateBlockMsg{Msg: msg, Hash: transactionHash})
+		return nil
+	}
+
+	return GetDB(transaction).Model(&TransactionStatus{}).Where("hash = ?", transactionHash).Updates(
+		map[string]interface{}{"block_id": newBlockID, "error": msg}).Error
+}
+
+func UpdateBlockMsgBatches(dbTx *gorm.DB, newBlockID int64) error {
+	defer func() {
+		updBlockMsg = []updateBlockMsg{}
+	}()
 	if len(updBlockMsg) == 0 {
 		return nil
 	}
 	var (
-		upErrStr, upBlockIdStr string
-		hashArr                [][]byte
-		header                 = "UPDATE transactions_status SET"
-		colErr, colBlockId     = "error = CASE hash", "block_id = CASE hash"
+		upStr   string
+		hashArr [][]byte
 	)
-
 	for _, s := range updBlockMsg {
-		if s == nil {
-			continue
-		}
 		hashArr = append(hashArr, s.Hash)
-		upErrStr += fmt.Sprintf("WHEN decode('%x','hex') THEN '%s' ", s.Hash, strings.Replace(s.Result, `'`, `''`, -1))
-		upBlockIdStr += fmt.Sprintf("WHEN decode('%x','hex') THEN %d ", s.Hash, newBlockID)
+		upStr += fmt.Sprintf("WHEN decode('%x','hex') THEN '%s' ", s.Hash, strings.Replace(s.Msg, `'`, `''`, -1))
 	}
-	if len(hashArr) == 0 {
-		return nil
-	}
-	sqlStr := fmt.Sprintf("%s ", header)
-	sqlStr += fmt.Sprintf(" %s %s END,", colErr, upErrStr)
-	sqlStr += fmt.Sprintf(" %s %s END", colBlockId, upBlockIdStr)
-	sqlStr += fmt.Sprint(" WHERE hash in(?)")
+	sqlStr := fmt.Sprintf("UPDATE transactions_status SET error = CASE hash %s END , block_id  = %d WHERE hash in(?)", upStr, newBlockID)
 	return dbTx.Exec(sqlStr, hashArr).Error
 }
 
 // SetError is updating transaction status error
-func (ts *TransactionStatus) SetError(dbTx *DbTransaction, errorText string, transactionHash []byte) error {
-	return GetDB(dbTx).Model(&TransactionStatus{}).Where("hash = ?", transactionHash).Update("error", errorText).Error
+func (ts *TransactionStatus) SetError(transaction *DbTransaction, errorText string, transactionHash []byte) error {
+	return GetDB(transaction).Model(&TransactionStatus{}).Where("hash = ?", transactionHash).Update("error", errorText).Error
 }
 
 // UpdatePenalty is updating penalty
-func (ts *TransactionStatus) UpdatePenalty(dbTx *DbTransaction, transactionHash []byte) error {
-	return GetDB(dbTx).Model(&TransactionStatus{}).Where("hash = ? AND penalty = 0", transactionHash).Update("penalty", pbgo.TxInvokeStatusCode_PENALTY).Error
+func (ts *TransactionStatus) UpdatePenalty(transaction *DbTransaction, transactionHash []byte) error {
+	return GetDB(transaction).Model(&TransactionStatus{}).Where("hash = ? AND penalty = 0", transactionHash).Update("penalty", 1).Error
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/IBAX-io/go-ibax/packages/converter"
 )
 
-func GetTxRecord(tx *DbTransaction, hashStr string) (resultList []any, err error) {
+func GetTxRecord(tx *DbTransaction, hashStr string) (resultList []interface{}, err error) {
 	db := GetDB(tx)
 	// get record from rollback_tx
 	var (
@@ -35,14 +35,14 @@ func GetTxRecord(tx *DbTransaction, hashStr string) (resultList []any, err error
 				continue
 			}
 			values := make([][]byte, len(cols))
-			scanArgs := make([]any, len(values))
+			scanArgs := make([]interface{}, len(values))
 			for i := range values {
 				scanArgs[i] = &values[i]
 			}
 			for rows.Next() {
 				err = rows.Scan(scanArgs...)
 				if err == nil {
-					row := make(map[string]any)
+					row := make(map[string]interface{})
 					for i, col := range values {
 						var value string
 						if col != nil {

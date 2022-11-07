@@ -32,7 +32,7 @@ const (
 
 type token struct {
 	Type  int
-	Value any
+	Value interface{}
 }
 
 type opFunc func()
@@ -48,7 +48,7 @@ func parsing(input string, itype int) (*[]token, error) {
 	var err error
 
 	tokens := make([]token, 0)
-	newToken := func(itype int, value any) {
+	newToken := func(itype int, value interface{}) {
 		tokens = append(tokens, token{itype, value})
 	}
 	prevNumber := func() bool {
@@ -76,7 +76,7 @@ func parsing(input string, itype int) (*[]token, error) {
 			continue
 		}
 		if numlen > 0 {
-			var val any
+			var val interface{}
 
 			switch itype {
 			case expInt:
@@ -124,7 +124,7 @@ func parsing(input string, itype int) (*[]token, error) {
 func calcExp(tokens []token, resType int, prec string) string {
 	var top int
 
-	stack := make([]any, 0, 16)
+	stack := make([]interface{}, 0, 16)
 
 	addInt := func() {
 		stack[top-1] = stack[top-1].(int64) + stack[top].(int64)
@@ -188,7 +188,7 @@ func calcExp(tokens []token, resType int, prec string) string {
 						return errDiv.Error()
 					}
 				case expMoney:
-					if stack[top].(decimal.Decimal).Cmp(decimal.Zero) == 0 {
+					if stack[top].(decimal.Decimal).Cmp(decimal.New(0, 0)) == 0 {
 						return errDiv.Error()
 					}
 				}

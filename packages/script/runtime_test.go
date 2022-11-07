@@ -12,7 +12,7 @@ import (
 
 func TestCalcMem(t *testing.T) {
 	cases := []struct {
-		v   any
+		v   interface{}
 		mem int64
 	}{
 		{true, 1},

@@ -67,9 +67,9 @@ type loginResult struct {
 	KeyID       string        `json:"key_id,omitempty"`
 	Account     string        `json:"account,omitempty"`
 	NotifyKey   string        `json:"notify_key,omitempty"`
-	IsNode      bool          `json:"isnode"`
-	IsOwner     bool          `json:"isowner"`
-	IsCLB       bool          `json:"clb"`
+	IsNode      bool          `json:"isnode,omitempty"`
+	IsOwner     bool          `json:"isowner,omitempty"`
+	IsCLB       bool          `json:"clb,omitempty"`
 	Timestamp   string        `json:"timestamp,omitempty"`
 	Roles       []rolesResult `json:"roles,omitempty"`
 }
@@ -167,31 +167,27 @@ func (m Mode) loginHandler(w http.ResponseWriter, r *http.Request) {
 			nodePrivateKey := syspar.GetNodePrivKey()
 
 			contract := smart.GetContract("NewUser", 1)
-			sc := types.SmartTransaction{
+			sc := types.SmartContract{
 				Header: &types.Header{
 					ID:          int(contract.Info().ID),
-					EcosystemID: 1,
 					Time:        time.Now().Unix(),
+					EcosystemID: 1,
 					KeyID:       conf.Config.KeyID,
 					NetworkID:   conf.Config.LocalConf.NetworkID,
 				},
-				Params: map[string]any{
+				Params: map[string]interface{}{
 					"NewPubkey": hex.EncodeToString(publicKey),
 					"Ecosystem": client.EcosystemID,
 				},
 			}
 
-			stp := &transaction.SmartTransactionParser{
-				SmartContract: &smart.SmartContract{TxSmart: new(types.SmartTransaction)},
-			}
-			txData, err := stp.BinMarshalWithPrivate(&sc, nodePrivateKey, true)
+			txData, txHash, err := transaction.NewInternalTransaction(sc, nodePrivateKey)
 			if err != nil {
 				log.WithFields(log.Fields{"type": consts.ContractError, "err": err}).Error("Building transaction")
 				errorResponse(w, err)
 				return
 			}
-
-			if err := m.ContractRunner.RunContract(txData, stp.Hash, sc.KeyID, stp.Timestamp, logger); err != nil {
+			if err := m.ContractRunner.RunContract(txData, txHash, sc.KeyID, sc.Time, logger); err != nil {
 				errorResponse(w, err)
 				return
 			}
@@ -200,7 +196,7 @@ func (m Mode) loginHandler(w http.ResponseWriter, r *http.Request) {
 				gt := 3 * syspar.GetMaxBlockGenerationTime()
 				his := &sqldb.History{}
 				for i := 0; i < 2; i++ {
-					found, err := his.Get(stp.Hash)
+					found, err := his.Get(txHash)
 					if err != nil {
 						errorResponse(w, err)
 						return
@@ -259,7 +255,7 @@ func (m Mode) loginHandler(w http.ResponseWriter, r *http.Request) {
 		client.RoleID = checkedRole
 	}
 
-	verify, err := crypto.Verify(publicKey, []byte(nonceSalt()+uid), form.Signature.Bytes())
+	verify, err := crypto.CheckSign(publicKey, []byte(nonceSalt()+uid), form.Signature.Bytes())
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.CryptoError, "pubkey": publicKey, "uid": uid, "signature": form.Signature.Bytes()}).Error("checking signature")
 		errorResponse(w, err)

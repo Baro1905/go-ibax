@@ -88,7 +88,7 @@ func SendExternalTransaction() error {
 			return
 		}
 		if err := transaction.CreateContract(item.ResultContract, nodeKeyID,
-			map[string]any{
+			map[string]interface{}{
 				"Status": errCode,
 				"Msg":    resText,
 				"Block":  block,
@@ -117,7 +117,7 @@ func SendExternalTransaction() error {
 			}
 			values := url.Values{"UID": {item.Uid}}
 
-			var params map[string]any
+			var params map[string]interface{}
 			if err = json.Unmarshal([]byte(item.Value), &params); err != nil {
 				log.WithFields(log.Fields{"type": consts.JSONUnmarshallError, "error": err}).Error("Unmarshal params")
 				delList = append(delList, item.Id)

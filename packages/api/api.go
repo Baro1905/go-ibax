@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/IBAX-io/go-ibax/packages/storage/sqldb"
+
 	"github.com/gorilla/schema"
 
 	"github.com/IBAX-io/go-ibax/packages/consts"
@@ -46,7 +48,7 @@ func (c *Client) Prefix() string {
 	return converter.Int64ToStr(c.EcosystemID)
 }
 
-func jsonResponse(w http.ResponseWriter, v any) {
+func jsonResponse(w http.ResponseWriter, v interface{}) {
 	jsonResult, err := json.Marshal(v)
 	if err != nil {
 		log.WithFields(log.Fields{"type": consts.JSONMarshallError, "error": err}).Error("marhsalling http response to json")
@@ -72,6 +74,10 @@ func errorResponse(w http.ResponseWriter, err error, code ...int) {
 	}
 
 	jsonResponse(w, et)
+}
+
+func JsonCodeResponse(w http.ResponseWriter, ct *sqldb.Response) {
+	jsonResponse(w, ct)
 }
 
 type formValidator interface {

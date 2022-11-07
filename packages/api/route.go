@@ -6,10 +6,9 @@
 package api
 
 import (
-	"net/http"
-
 	"github.com/IBAX-io/go-ibax/packages/consts"
 	"github.com/IBAX-io/go-ibax/packages/service/node"
+	"net/http"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
@@ -97,13 +96,13 @@ func (m Mode) SetBlockchainRoutes(r Router) {
 	api.HandleFunc("/appparams/{appID}", authRequire(m.getAppParamsHandler)).Methods("GET")
 	api.HandleFunc("/appcontent/{appID}", authRequire(m.getAppContentHandler)).Methods("GET")
 	api.HandleFunc("/history/{name}/{id}", authRequire(getHistoryHandler)).Methods("GET")
-	api.HandleFunc("/balance/{wallet}", m.getBalanceHandler).Methods("GET")
+	api.HandleFunc("/balance/{wallet}", authRequire(m.getBalanceHandler)).Methods("GET")
 	api.HandleFunc("/block/{id}", getBlockInfoHandler).Methods("GET")
 	api.HandleFunc("/maxblockid", getMaxBlockHandler).Methods("GET")
 	api.HandleFunc("/blocks", getBlocksTxInfoHandler).Methods("GET")
 	api.HandleFunc("/detailed_blocks", getBlocksDetailedInfoHandler).Methods("GET")
 	api.HandleFunc("/ecosystemparams", authRequire(m.getEcosystemParamsHandler)).Methods("GET")
-	api.HandleFunc("/systemparams", authRequire(getPlatformParamsHandler)).Methods("GET")
+	api.HandleFunc("/systemparams", authRequire(getSystemParamsHandler)).Methods("GET")
 	api.HandleFunc("/ecosystemparam/{name}", authRequire(m.getEcosystemParamHandler)).Methods("GET")
 	api.HandleFunc("/ecosystemname", getEcosystemNameHandler).Methods("GET")
 }
