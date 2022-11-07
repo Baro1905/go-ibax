@@ -6,6 +6,7 @@
 package converter
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -19,8 +20,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"bytes"
 
 	"github.com/IBAX-io/go-ibax/packages/consts"
 
@@ -50,14 +49,6 @@ var FirstEcosystemTables = map[string]bool{
 	`buffer_data`:        true,
 	`app_params`:         true,
 	`views`:              true,
-}
-
-// FillLeft is filling slice
-func FillLeft(slice []byte) []byte {
-	if len(slice) >= 32 {
-		return slice
-	}
-	return append(make([]byte, 32-len(slice)), slice...)
 }
 
 func EncodeLenInt64(data *[]byte, x int64) *[]byte {
@@ -214,7 +205,7 @@ func DecodeBytesBuf(buf *bytes.Buffer) ([]byte, error) {
 }
 
 // BinMarshal converts v parameter to []byte slice.
-func BinMarshal(out *[]byte, v interface{}) (*[]byte, error) {
+func BinMarshal(out *[]byte, v any) (*[]byte, error) {
 	var err error
 
 	t := reflect.ValueOf(v)
@@ -273,7 +264,7 @@ func BinMarshal(out *[]byte, v interface{}) (*[]byte, error) {
 	return out, nil
 }
 
-func BinUnmarshalBuff(buf *bytes.Buffer, v interface{}) error {
+func BinUnmarshalBuff(buf *bytes.Buffer, v any) error {
 	t := reflect.ValueOf(v)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -369,7 +360,7 @@ func BinUnmarshalBuff(buf *bytes.Buffer, v interface{}) error {
 }
 
 // BinUnmarshal converts []byte slice which has been made with BinMarshal to v
-func BinUnmarshal(out *[]byte, v interface{}) error {
+func BinUnmarshal(out *[]byte, v any) error {
 	t := reflect.ValueOf(v)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -531,7 +522,7 @@ func IntToStr(num int) string {
 }
 
 // DecToBin converts interface to []byte
-func DecToBin(v interface{}, sizeBytes int64) []byte {
+func DecToBin(v any, sizeBytes int64) []byte {
 	var dec int64
 	switch v.(type) {
 	case int:
@@ -548,7 +539,7 @@ func DecToBin(v interface{}, sizeBytes int64) []byte {
 }
 
 // BinToHex converts interface to hex []byte
-func BinToHex(v interface{}) []byte {
+func BinToHex(v any) []byte {
 	var bin []byte
 	switch v.(type) {
 	case []byte:
@@ -562,7 +553,7 @@ func BinToHex(v interface{}) []byte {
 }
 
 // HexToBin converts hex interface to binary []byte
-func HexToBin(ihexdata interface{}) []byte {
+func HexToBin(ihexdata any) []byte {
 	var hexdata string
 	switch ihexdata.(type) {
 	case []byte:
@@ -608,7 +599,7 @@ func BytesShift(str *[]byte, index int64) (ret []byte) {
 }
 
 // InterfaceToStr converts the interfaces to the string
-func InterfaceToStr(v interface{}) (string, error) {
+func InterfaceToStr(v any) (string, error) {
 	var str string
 	if v == nil {
 		return ``, nil
@@ -641,7 +632,7 @@ func InterfaceToStr(v interface{}) (string, error) {
 }
 
 // InterfaceSliceToStr converts the slice of interfaces to the slice of strings
-func InterfaceSliceToStr(i []interface{}) (strs []string, err error) {
+func InterfaceSliceToStr(i []any) (strs []string, err error) {
 	var val string
 	for _, v := range i {
 		val, err = InterfaceToStr(v)
@@ -654,7 +645,7 @@ func InterfaceSliceToStr(i []interface{}) (strs []string, err error) {
 }
 
 // InterfaceToFloat64 converts the interfaces to the float64
-func InterfaceToFloat64(i interface{}) float64 {
+func InterfaceToFloat64(i any) float64 {
 	var result float64
 	switch i.(type) {
 	case int:
@@ -672,7 +663,7 @@ func InterfaceToFloat64(i interface{}) float64 {
 }
 
 // BytesShiftReverse gets []byte from the end of the input and cut the input pointer to []byte
-func BytesShiftReverse(str *[]byte, v interface{}) []byte {
+func BytesShiftReverse(str *[]byte, v any) []byte {
 	var index int64
 	switch v.(type) {
 	case int:
@@ -754,20 +745,8 @@ func StrToMoney(str string) float64 {
 	return StrToFloat64(newStr)
 }
 
-// AddressToString converts int64 address to chain address as XXXX-...-XXXX.
-func AddressToString(address int64) (ret string) {
-	num := strconv.FormatUint(uint64(address), 10)
-	val := []byte(strings.Repeat("0", 20-len(num)) + num)
-
-	for i := 0; i < 4; i++ {
-		ret += string(val[i*4:(i+1)*4]) + `-`
-	}
-	ret += string(val[16:])
-	return
-}
-
 // EncodeLengthPlusData encoding interface into []byte
-func EncodeLengthPlusData(idata interface{}) []byte {
+func EncodeLengthPlusData(idata any) []byte {
 	var data []byte
 	switch idata.(type) {
 	case int64:
@@ -780,60 +759,6 @@ func EncodeLengthPlusData(idata interface{}) []byte {
 	//log.Debug("data: %x", data)
 	//log.Debug("len data: %d", len(data))
 	return append(EncodeLength(int64(len(data))), data...)
-}
-
-// StringToAddress converts string chain address to int64 address. The input address can be a positive or negative
-// number, or chain address in XXXX-...-XXXX format. Returns 0 when error occurs.
-func StringToAddress(address string) (result int64) {
-	var (
-		err error
-		ret uint64
-	)
-	if len(address) == 0 {
-		return 0
-	}
-	if address[0] == '-' {
-		var id int64
-		id, err = strconv.ParseInt(address, 10, 64)
-		if err != nil {
-			return 0
-		}
-		address = strconv.FormatUint(uint64(id), 10)
-	}
-	if len(address) < 20 {
-		address = strings.Repeat(`0`, 20-len(address)) + address
-	}
-
-	val := []byte(strings.Replace(address, `-`, ``, -1))
-	if len(val) != 20 {
-		return
-	}
-	if ret, err = strconv.ParseUint(string(val), 10, 64); err != nil {
-		return 0
-	}
-	if checkSum(val[:len(val)-1]) != int(val[len(val)-1]-'0') {
-		return 0
-	}
-	result = int64(ret)
-	return
-}
-
-// CheckSum calculates the 0-9 check sum of []byte
-func checkSum(val []byte) int {
-	var one, two int
-	for i, ch := range val {
-		digit := int(ch - '0')
-		if i&1 == 1 {
-			one += digit
-		} else {
-			two += digit
-		}
-	}
-	checksum := (two + 3*one) % 10
-	if checksum > 0 {
-		checksum = 10 - checksum
-	}
-	return checksum
 }
 
 // ChainMoney converts minimal unit to legibility unit. For example, 123455000000000 => 123.455
@@ -960,18 +885,6 @@ func IsLatin(name string) bool {
 	return true
 }
 
-// IsValidAddress checks if the specified address is chain address.
-func IsValidAddress(address string) bool {
-	val := []byte(strings.Replace(address, `-`, ``, -1))
-	if len(val) != 20 {
-		return false
-	}
-	if _, err := strconv.ParseUint(string(val), 10, 64); err != nil {
-		return false
-	}
-	return checkSum(val[:len(val)-1]) == int(val[len(val)-1]-'0')
-}
-
 // Escape deletes unaccessable characters
 func Escape(data string) string {
 	out := make([]rune, 0, len(data))
@@ -987,7 +900,7 @@ func Escape(data string) string {
 }
 
 // FieldToBytes returns the value of n-th field of v as []byte
-func FieldToBytes(v interface{}, num int) []byte {
+func FieldToBytes(v any, num int) []byte {
 	t := reflect.ValueOf(v)
 	ret := make([]byte, 0, 2048)
 	if t.Kind() == reflect.Struct && num < t.NumField() {
@@ -1051,7 +964,7 @@ func RoundWithoutPrecision(num float64) int64 {
 }
 
 // ValueToInt converts interface (string or int64) to int64
-func ValueToInt(v interface{}) (ret int64, err error) {
+func ValueToInt(v any) (ret int64, err error) {
 	switch val := v.(type) {
 	case float64:
 		ret = int64(val)
@@ -1071,6 +984,8 @@ func ValueToInt(v interface{}) (ret int64, err error) {
 			}
 			err = fmt.Errorf(`%s is not a valid integer %s`, val, errText)
 		}
+	case decimal.Decimal:
+		ret = val.IntPart()
 	default:
 		if v == nil {
 			return 0, nil
@@ -1084,7 +999,7 @@ func ValueToInt(v interface{}) (ret int64, err error) {
 	return
 }
 
-func ValueToDecimal(v interface{}) (ret decimal.Decimal, err error) {
+func ValueToDecimal(v any) (ret decimal.Decimal, err error) {
 	switch val := v.(type) {
 	case float64:
 		ret = decimal.NewFromFloat(val).Floor()
@@ -1113,7 +1028,7 @@ func Int64Toint(dat int64) (int, error) {
 	return strconv.Atoi(str)
 }
 
-func MarshalJson(v interface{}) string {
+func MarshalJson(v any) string {
 	buff, err := json.Marshal(v)
 	if err != nil {
 		log.WithFields(log.Fields{"v": v, "error": err}).Error("marshalJson error")

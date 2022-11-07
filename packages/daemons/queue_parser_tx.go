@@ -10,8 +10,6 @@ import (
 	"sync/atomic"
 
 	"github.com/IBAX-io/go-ibax/packages/transaction"
-
-	log "github.com/sirupsen/logrus"
 )
 
 // QueueParserTx parses transaction from the queue
@@ -30,14 +28,14 @@ func QueueParserTx(ctx context.Context, d *daemon) error {
 	//	d.logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("getting info block")
 	//	return err
 	//}
-	//if infoBlock.BlockID == 0 {
+	//if infoBlock.BlockId == 0 {
 	//	d.logger.Debug("no blocks for parsing")
 	//	return nil
 	//}
 
 	err := transaction.ProcessTransactionsQueue(nil)
 	if err != nil {
-		d.logger.WithFields(log.Fields{"error": err}).Error("parsing transactions")
+		d.logger.WithError(err).Error("parsing transactions")
 		return err
 	}
 	//for {
@@ -46,7 +44,7 @@ func QueueParserTx(ctx context.Context, d *daemon) error {
 	//		if attempt {
 	//			err = transaction.ProcessTransactionsAttempt(p.DbTransaction)
 	//			if err != nil {
-	//				d.logger.WithFields(log.Fields{"error": err}).Error("parsing transactions attempt")
+	//				d.logger.WithError(err).Error("parsing transactions attempt")
 	//				return err
 	//			}
 	//		}

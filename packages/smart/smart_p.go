@@ -21,13 +21,14 @@ import (
 	"github.com/IBAX-io/go-ibax/packages/consts"
 	"github.com/IBAX-io/go-ibax/packages/converter"
 	"github.com/IBAX-io/go-ibax/packages/language"
+	"github.com/IBAX-io/go-ibax/packages/migration"
 	"github.com/IBAX-io/go-ibax/packages/script"
 	"github.com/IBAX-io/go-ibax/packages/storage/sqldb"
 	qb "github.com/IBAX-io/go-ibax/packages/storage/sqldb/queryBuilder"
 	"github.com/IBAX-io/go-ibax/packages/types"
 	"github.com/IBAX-io/go-ibax/packages/utils"
 	"github.com/IBAX-io/go-ibax/packages/utils/metric"
-
+	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
 )
@@ -54,7 +55,7 @@ const (
 	nCallDelayedContract = "CallDelayedContract"
 )
 
-//SignRes contains the data of the signature
+// SignRes contains the data of the signature
 type SignRes struct {
 	Param string `json:"name"`
 	Text  string `json:"text"`
@@ -75,14 +76,14 @@ func getCost(name string) int64 {
 	return -1
 }
 
-// UpdateSysParam updates the system parameter
-func UpdateSysParam(sc *SmartContract, name, value, conditions string) (int64, error) {
+// UpdatePlatformParam updates the system parameter
+func UpdatePlatformParam(sc *SmartContract, name, value, conditions string) (int64, error) {
 	var (
 		fields []string
-		values []interface{}
+		values []any
 	)
-	par := &sqldb.SystemParameter{}
-	found, err := par.Get(name)
+	par := &sqldb.PlatformParameter{}
+	found, err := par.Get(sc.DbTransaction, name)
 	if err != nil {
 		return 0, logErrorDB(err, "system parameter get")
 	}
@@ -175,7 +176,7 @@ func UpdateSysParam(sc *SmartContract, name, value, conditions string) (int64, e
 	if len(fields) == 0 {
 		return 0, logErrorShort(errEmpty, consts.EmptyObject)
 	}
-	_, _, err = sc.update(fields, values, "1_system_parameters", "id", par.ID)
+	_, _, err = sc.update(fields, values, "1_platform_parameters", "id", par.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -203,42 +204,36 @@ func SysFuel(state int64) string {
 }
 
 // Int converts the value to a number
-func Int(v interface{}) (int64, error) {
+func Int(v any) (int64, error) {
 	return converter.ValueToInt(v)
 }
 
 // Str converts the value to a string
-func Str(v interface{}) (ret string) {
+func Str(v any) (ret string) {
 	if v == nil {
 		return
 	}
-	switch val := v.(type) {
-	case float64:
-		ret = fmt.Sprintf(`%f`, val)
-	default:
-		ret = fmt.Sprintf(`%v`, val)
-	}
-	return
+	return fmt.Sprintf(`%v`, v)
 }
 
 // Money converts the value into a numeric type for money
-func Money(v interface{}) (decimal.Decimal, error) {
+func Money(v any) (decimal.Decimal, error) {
 	return script.ValueToDecimal(v)
 }
 
-func MoneyDiv(d1, d2 interface{}) string {
+func MoneyDiv(d1, d2 any) string {
 	val1, _ := script.ValueToDecimal(d1)
 	val2, _ := script.ValueToDecimal(d2)
 	return val1.Div(val2).Mul(decimal.New(1, 2)).StringFixed(0)
 }
 
 // Float converts the value to float64
-func Float(v interface{}) (ret float64) {
+func Float(v any) (ret float64) {
 	return script.ValueToFloat(v)
 }
 
 // Join is joining input with separator
-func Join(input []interface{}, sep string) string {
+func Join(input []any, sep string) string {
 	var ret string
 	for i, item := range input {
 		if i > 0 {
@@ -250,9 +245,9 @@ func Join(input []interface{}, sep string) string {
 }
 
 // Split splits the input string to array
-func Split(input, sep string) []interface{} {
+func Split(input, sep string) []any {
 	out := strings.Split(input, sep)
-	result := make([]interface{}, len(out))
+	result := make([]any, len(out))
 	for i, val := range out {
 		result[i] = reflect.ValueOf(val).Interface()
 	}
@@ -269,7 +264,6 @@ func PubToID(hexkey string) int64 {
 	return crypto.Address(pubkey)
 }
 
-// Replace replaces old substrings to new substrings
 func CheckSign(pub, data, sign string) (bool, error) {
 	pk, err := hex.DecodeString(pub)
 	if err != nil {
@@ -280,10 +274,9 @@ func CheckSign(pub, data, sign string) (bool, error) {
 		return false, err
 	}
 	pk = crypto.CutPub(pk)
-	return crypto.CheckSign(pk, []byte(data), s)
+	return crypto.Verify(pk, []byte(data), s)
 }
 
-// Replace replaces old substrings to new substrings
 func CheckNumberChars(data string) bool {
 	dat := []byte(data)
 	dl := len(dat)
@@ -317,7 +310,7 @@ func CreateLanguage(sc *SmartContract, name, trans string) (id int64, err error)
 	if err = language.UpdateLang(int(sc.TxSmart.EcosystemID), name, trans); err != nil {
 		return 0, err
 	}
-	if _, id, err = DBInsert(sc, `@1languages`, types.LoadMap(map[string]interface{}{"name": name,
+	if _, id, err = DBInsert(sc, `@1languages`, types.LoadMap(map[string]any{"name": name,
 		"ecosystem": idStr, "res": trans})); err != nil {
 		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("inserting new language")
 		return 0, err
@@ -334,7 +327,7 @@ func EditLanguage(sc *SmartContract, id int64, name, trans string) error {
 		return err
 	}
 	if _, err := DBUpdate(sc, `@1languages`, id,
-		types.LoadMap(map[string]interface{}{"name": name, "res": trans})); err != nil {
+		types.LoadMap(map[string]any{"name": name, "res": trans})); err != nil {
 		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("inserting new language")
 		return err
 	}
@@ -421,7 +414,15 @@ func CreateEcosystem(sc *SmartContract, wallet int64, name string) (int64, error
 		return 0, logErrorDB(err, "generating next application id")
 	}
 
-	if err = sqldb.ExecSchemaEcosystem(sc.DbTransaction, int(id), wallet, name, converter.StrToInt64(sp.Value), appID); err != nil {
+	if err = sqldb.ExecSchemaEcosystem(sc.DbTransaction,
+		migration.SqlData{
+			Ecosystem: int(id),
+			Wallet:    wallet,
+			Name:      name,
+			Founder:   converter.StrToInt64(sp.Value),
+			AppID:     appID,
+			Account:   converter.AddressToString(wallet),
+		}); err != nil {
 		return 0, logErrorDB(err, "executing ecosystem schema")
 	}
 
@@ -437,32 +438,32 @@ func CreateEcosystem(sc *SmartContract, wallet int64, name string) (int64, error
 
 	sc.FullAccess = true
 
-	if _, _, err = DBInsert(sc, "@1parameters", types.LoadMap(map[string]interface{}{
-		"name": "ecosystem_wallet", "value": "0", "conditions": `ContractConditions("MainCondition")`,
+	if _, _, err = DBInsert(sc, "@1parameters", types.LoadMap(map[string]any{
+		"name": "ecosystem_wallet", "value": "0", "conditions": `ContractConditions("DeveloperCondition")`,
 		"ecosystem": idStr,
 	})); err != nil {
 		return 0, logErrorDB(err, "inserting system parameter")
 	}
 
-	if _, _, err = DBInsert(sc, "@1applications", types.LoadMap(map[string]interface{}{
+	if _, _, err = DBInsert(sc, "@1applications", types.LoadMap(map[string]any{
 		"name":       "System",
 		"conditions": `ContractConditions("MainCondition")`,
 		"ecosystem":  id,
 	})); err != nil {
 		return 0, logErrorDB(err, "inserting application")
 	}
-	if _, _, err = DBInsert(sc, `@1pages`, types.LoadMap(map[string]interface{}{"ecosystem": idStr,
+	if _, _, err = DBInsert(sc, `@1pages`, types.LoadMap(map[string]any{"ecosystem": idStr,
 		"name": "default_page", "app_id": appID, "value": SysParamString("default_ecosystem_page"),
 		"menu": "default_menu", "conditions": `ContractConditions("DeveloperCondition")`})); err != nil {
 		return 0, logErrorDB(err, "inserting default page")
 	}
-	if _, _, err = DBInsert(sc, `@1menu`, types.LoadMap(map[string]interface{}{"ecosystem": idStr,
+	if _, _, err = DBInsert(sc, `@1menu`, types.LoadMap(map[string]any{"ecosystem": idStr,
 		"name": "default_menu", "value": SysParamString("default_ecosystem_menu"), "title": "default", "conditions": `ContractConditions("DeveloperCondition")`})); err != nil {
-		return 0, logErrorDB(err, "inserting default page")
+		return 0, logErrorDB(err, "inserting default menu")
 	}
 
 	var (
-		ret []interface{}
+		ret []any
 		pub string
 	)
 	_, ret, err = DBSelect(sc, "@1keys", "pub", wallet, `id`, 0, 1, nil, "", "", false)
@@ -475,7 +476,7 @@ func CreateEcosystem(sc *SmartContract, wallet int64, name string) (int64, error
 			pub = v.(string)
 		}
 	}
-	if _, _, err := DBInsert(sc, `@1keys`, types.LoadMap(map[string]interface{}{
+	if _, _, err := DBInsert(sc, `@1keys`, types.LoadMap(map[string]any{
 		"id":        wallet,
 		"account":   converter.AddressToString(wallet),
 		"pub":       pub,
@@ -487,7 +488,7 @@ func CreateEcosystem(sc *SmartContract, wallet int64, name string) (int64, error
 	sc.FullAccess = false
 	// because of we need to know which ecosystem to rollback.
 	// All tables will be deleted so it's no need to rollback data from tables
-	if _, _, err := DBInsert(sc, "@1ecosystems", types.LoadMap(map[string]interface{}{
+	if _, _, err := DBInsert(sc, "@1ecosystems", types.LoadMap(map[string]any{
 		"id":   id,
 		"name": name,
 	})); err != nil {
@@ -503,7 +504,7 @@ func EditEcosysName(sc *SmartContract, sysID int64, newName string) error {
 	}
 
 	_, err := DBUpdate(sc, "@1ecosystems", sysID,
-		types.LoadMap(map[string]interface{}{"name": newName}))
+		types.LoadMap(map[string]any{"name": newName}))
 	return err
 }
 
@@ -531,7 +532,7 @@ func BndWallet(sc *SmartContract, tblid int64, state int64) error {
 		return err
 	}
 
-	if _, _, err := sc.update([]string{"wallet_id"}, []interface{}{sc.TxSmart.KeyID}, "1_contracts", "id", tblid); err != nil {
+	if _, _, err := sc.update([]string{"wallet_id"}, []any{sc.TxSmart.KeyID}, "1_contracts", "id", tblid); err != nil {
 		log.WithFields(log.Fields{"error": err, "contract_id": tblid}).Error("on updating contract wallet")
 		return err
 	}
@@ -545,7 +546,7 @@ func UnbndWallet(sc *SmartContract, tblid int64, state int64) error {
 		return err
 	}
 
-	if _, _, err := sc.update([]string{"wallet_id"}, []interface{}{0}, "1_contracts", "id", tblid); err != nil {
+	if _, _, err := sc.update([]string{"wallet_id"}, []any{0}, "1_contracts", "id", tblid); err != nil {
 		log.WithFields(log.Fields{"error": err, "contract_id": tblid}).Error("on updating contract wallet")
 		return err
 	}
@@ -554,7 +555,7 @@ func UnbndWallet(sc *SmartContract, tblid int64, state int64) error {
 }
 
 // CheckSignature checks the additional signatures for the contract
-func CheckSignature(sc *SmartContract, i map[string]interface{}, name string) error {
+func CheckSignature(sc *SmartContract, i map[string]any, name string) error {
 	state, name := converter.ParseName(name)
 	sn := sqldb.Signature{}
 	sn.SetTablePrefix(converter.Int64ToStr(int64(state)))
@@ -595,12 +596,12 @@ func CheckSignature(sc *SmartContract, i map[string]interface{}, name string) er
 }
 
 // DBSelectMetrics returns list of metrics by name and time interval
-func DBSelectMetrics(sc *SmartContract, metric, timeInterval, aggregateFunc string) ([]interface{}, error) {
+func DBSelectMetrics(sc *SmartContract, metric, timeInterval, aggregateFunc string) ([]any, error) {
 	if conf.Config.IsSupportingCLB() {
 		return nil, ErrNotImplementedOnCLB
 	}
 
-	timeBlock := time.Unix(sc.TxSmart.Time, 0).Format(`2006-01-02 15:04:05`)
+	timeBlock := time.Unix(sc.Timestamp, 0).Format(`2006-01-02 15:04:05`)
 	result, err := sqldb.GetMetricValues(metric, timeInterval, aggregateFunc, timeBlock)
 	if err != nil {
 		return nil, logErrorDB(err, "get values of metric")
@@ -610,7 +611,7 @@ func DBSelectMetrics(sc *SmartContract, metric, timeInterval, aggregateFunc stri
 
 // DBCollectMetrics returns actual values of all metrics
 // This function used to further store these values
-func DBCollectMetrics(sc *SmartContract) []interface{} {
+func DBCollectMetrics(sc *SmartContract) []any {
 	if conf.Config.IsSupportingCLB() {
 		return nil
 	}
@@ -619,18 +620,18 @@ func DBCollectMetrics(sc *SmartContract) []interface{} {
 		metric.CollectMetricDataForEcosystemTables,
 		metric.CollectMetricDataForEcosystemTx,
 	)
-	return c.Values(sc.TxSmart.Time)
+	return c.Values(sc.Timestamp)
 }
 
 // JSONDecode converts json string to object
-func JSONDecode(input string) (ret interface{}, err error) {
+func JSONDecode(input string) (ret any, err error) {
 	err = unmarshalJSON([]byte(input), &ret, "unmarshalling json")
 	ret = types.ConvertMap(ret)
 	return
 }
 
-// JSONEncodeIdent converts object to json string
-func JSONEncodeIndent(input interface{}, indent string) (string, error) {
+// JSONEncodeIndent converts object to json string
+func JSONEncodeIndent(input any, indent string) (string, error) {
 	rv := reflect.ValueOf(input)
 	if rv.Kind() == reflect.Ptr {
 		rv = rv.Elem()
@@ -654,17 +655,16 @@ func JSONEncodeIndent(input interface{}, indent string) (string, error) {
 	out = strings.Replace(out, `\u003c`, `<`, -1)
 	out = strings.Replace(out, `\u003e`, `>`, -1)
 	out = strings.Replace(out, `\u0026`, `&`, -1)
-
 	return out, nil
 }
 
 // JSONEncode converts object to json string
-func JSONEncode(input interface{}) (string, error) {
+func JSONEncode(input any) (string, error) {
 	return JSONEncodeIndent(input, ``)
 }
 
 // Append syn for golang 'append' function
-func Append(slice []interface{}, val interface{}) []interface{} {
+func Append(slice []any, val any) []any {
 	return append(slice, val)
 }
 
@@ -699,4 +699,313 @@ func DBCount(sc *SmartContract, tableName string, inWhere *types.Map) (count int
 
 func MathMod(x, y float64) float64 {
 	return math.Mod(x, y)
+}
+
+func MathModDecimal(x, y decimal.Decimal) decimal.Decimal {
+	return x.Mod(y)
+}
+func TransferSelf(sc *SmartContract, value string, source string, target string) (flag bool, err error) {
+	fromID := sc.TxSmart.KeyID
+	outputsMap := sc.OutputsMap
+	txInputsMap := sc.TxInputsMap
+	txOutputsMap := sc.TxOutputsMap
+	//txHash := sc.Hash
+	ecosystem := sc.TxSmart.EcosystemID
+	blockId := sc.BlockHeader.BlockId
+	//dbTx := sc.DbTransaction
+	keyUTXO := sqldb.KeyUTXO{Ecosystem: ecosystem, KeyId: fromID}
+	//sum, _ := decimal.NewFromString(value)
+	payValue, _ := decimal.NewFromString(value)
+	if strings.EqualFold("UTXO", source) && strings.EqualFold("Account", target) {
+
+		txInputs := sqldb.GetUnusedOutputsMap(keyUTXO, outputsMap)
+
+		if len(txInputs) == 0 {
+			return false, fmt.Errorf(eEcoCurrentBalance, converter.IDToAddress(fromID), ecosystem)
+		}
+
+		totalAmount := decimal.Zero
+		for _, input := range txInputs {
+			outputValue, _ := decimal.NewFromString(input.OutputValue)
+			totalAmount = totalAmount.Add(outputValue)
+		}
+
+		if totalAmount.GreaterThanOrEqual(payValue) && payValue.GreaterThan(decimal.Zero) {
+			flag = true // The transfer was successful
+			//txOutputs = append(txOutputs, sqldb.SpentInfo{OutputKeyId: toID, OutputValue: value, BlockId: blockId, Ecosystem: ecosystem})
+			totalAmount = totalAmount.Sub(payValue)
+			if _, _, err := sc.updateWhere([]string{"+amount"}, []any{payValue}, "1_keys", types.LoadMap(map[string]any{"id": fromID, "ecosystem": ecosystem})); err != nil {
+				return false, err
+			}
+		} else {
+			return false, fmt.Errorf(eEcoCurrentBalance, converter.IDToAddress(fromID), ecosystem)
+		}
+
+		// The change
+		var txOutputs []sqldb.SpentInfo
+		if totalAmount.GreaterThan(decimal.Zero) {
+			txOutputs = append(txOutputs, sqldb.SpentInfo{OutputIndex: 0, OutputKeyId: fromID, OutputValue: totalAmount.String(), BlockId: blockId, Ecosystem: ecosystem}) // The change
+		}
+		if len(txInputs) > 0 {
+			sqldb.PutAllOutputsMap(txInputs, txInputsMap)
+		}
+		if len(txOutputs) > 0 {
+			sqldb.PutAllOutputsMap(txOutputs, txOutputsMap)
+		}
+
+		sc.TxInputsMap = txInputsMap
+		sc.TxOutputsMap = txOutputsMap
+		return true, nil
+	} else if strings.EqualFold("Account", source) && strings.EqualFold("UTXO", target) {
+
+		var totalAmount decimal.Decimal
+		var txOutputs []sqldb.SpentInfo
+		if totalAmount, err = sc.accountBalanceSingle(ecosystem, fromID); err != nil {
+			return false, err
+		}
+		if totalAmount.GreaterThanOrEqual(payValue) && payValue.GreaterThan(decimal.Zero) {
+			flag = true // The transfer was successful
+			txOutputs = append(txOutputs, sqldb.SpentInfo{OutputIndex: 0, OutputKeyId: fromID, OutputValue: value, BlockId: blockId, Ecosystem: ecosystem})
+			totalAmount = totalAmount.Sub(payValue)
+			if _, _, err = sc.updateWhere([]string{`-amount`}, []any{payValue}, "1_keys", types.LoadMap(map[string]any{`id`: fromID, `ecosystem`: ecosystem})); err != nil {
+				return false, err
+			}
+		} else {
+			return false, fmt.Errorf(eEcoCurrentBalance, converter.IDToAddress(fromID), ecosystem)
+		}
+		if len(txOutputs) > 0 {
+			sqldb.PutAllOutputsMap(txOutputs, txOutputsMap)
+		}
+
+		sc.TxInputsMap = txInputsMap
+		sc.TxOutputsMap = txOutputsMap
+		return true, nil
+	}
+	return false, errors.New("transfer self fail")
+}
+
+func UtxoToken(sc *SmartContract, toID int64, value string) (flag bool, err error) {
+
+	cache := sc.PrevSysPar
+	getParams := func(name string) (map[int64]string, error) {
+		res := make(map[int64]string)
+		if len(cache[name]) > 0 {
+			ifuels := make([][]string, 0)
+			err = json.Unmarshal([]byte(cache[name]), &ifuels)
+			if err != nil {
+				log.WithFields(log.Fields{"type": consts.JSONUnmarshallError, "error": err}).Error("unmarshalling params from json")
+				return res, err
+			}
+			for _, item := range ifuels {
+				if len(item) < 2 {
+					continue
+				}
+				res[converter.StrToInt64(item[0])] = item[1]
+			}
+		}
+		return res, nil
+	}
+	var fuels = make(map[int64]string)
+	var wallets = make(map[int64]string)
+
+	fuels, err = getParams(syspar.FuelRate)
+	wallets, err = getParams(syspar.TaxesWallet)
+
+	fromID := sc.TxSmart.KeyID
+	outputsMap := sc.OutputsMap
+	txInputsMap := sc.TxInputsMap
+	txOutputsMap := sc.TxOutputsMap
+	//txHash := sc.Hash
+	ecosystem := sc.TxSmart.EcosystemID
+	blockId := sc.BlockHeader.BlockId
+	//dbTx := sc.DbTransaction
+	keyUTXO := sqldb.KeyUTXO{Ecosystem: ecosystem, KeyId: fromID}
+
+	txInputs := sqldb.GetUnusedOutputsMap(keyUTXO, outputsMap)
+	if len(txInputs) == 0 {
+		return false, fmt.Errorf(eEcoCurrentBalance, converter.IDToAddress(fromID), ecosystem)
+	}
+
+	totalAmount := decimal.Zero
+
+	var txOutputs []sqldb.SpentInfo
+
+	for _, input := range txInputs {
+		outputValue, _ := decimal.NewFromString(input.OutputValue)
+		totalAmount = totalAmount.Add(outputValue)
+	}
+
+	var outputIndex int32 = 0
+
+	// taxes_size = 3
+	TaxesSize := syspar.SysInt64(syspar.TaxesSize)
+
+	// if : ecosystem = 2 ,rule : taxes ecosystem 1 and 2
+	if ecosystem != consts.DefaultTokenEcosystem {
+		// rule : taxes ecosystem 1
+		{
+			var txOutputs1 []sqldb.SpentInfo
+			ecosystem1 := int64(consts.DefaultTokenEcosystem)
+			keyUTXO1 := sqldb.KeyUTXO{Ecosystem: ecosystem1, KeyId: fromID}
+			txInputs1 := sqldb.GetUnusedOutputsMap(keyUTXO1, outputsMap)
+			if len(txInputs1) == 0 {
+				return false, fmt.Errorf(eEcoCurrentBalance, converter.IDToAddress(fromID), ecosystem1)
+			}
+			totalAmount1 := decimal.Zero
+
+			for _, input1 := range txInputs1 {
+				outputValue1, _ := decimal.NewFromString(input1.OutputValue)
+				totalAmount1 = totalAmount1.Add(outputValue1)
+			}
+			var money1 = decimal.Zero
+			var fuelRate1 = decimal.Zero
+			var taxes1 = decimal.Zero
+			if ret, ok := fuels[ecosystem1]; ok {
+
+				fuelRate1, err = decimal.NewFromString(ret)
+				if err != nil {
+					return false, err
+				}
+				//	ecosystem fuelRate /10 *( bit + len(input))
+				money1 = fuelRate1.Div(decimal.NewFromInt(10)).Mul(decimal.NewFromInt(sc.TxSize).Add(decimal.NewFromInt(int64(len(txInputs1)))))
+
+				if money1.GreaterThan(totalAmount1) {
+					money1 = totalAmount1
+				}
+
+				taxes1 = money1.Mul(decimal.NewFromInt(TaxesSize)).Div(decimal.New(100, 0)).Floor()
+
+			}
+			if money1.GreaterThan(decimal.Zero) && taxes1.GreaterThan(decimal.Zero) {
+				if taxesWallet, ok := wallets[ecosystem1]; ok {
+					taxesID := converter.StrToInt64(taxesWallet)
+
+					flag = true
+					// 97%
+					txOutputs1 = append(txOutputs1, sqldb.SpentInfo{OutputIndex: outputIndex, OutputKeyId: sc.BlockHeader.KeyId, OutputValue: money1.Sub(taxes1).String(),
+						BlockId: blockId, Ecosystem: ecosystem1})
+					outputIndex++
+					// 3%
+					txOutputs1 = append(txOutputs1, sqldb.SpentInfo{OutputIndex: outputIndex, OutputKeyId: taxesID, OutputValue: taxes1.String(),
+						BlockId: blockId, Ecosystem: ecosystem1})
+					outputIndex++
+					totalAmount1 = totalAmount1.Sub(money1)
+				}
+			}
+
+			if totalAmount1.GreaterThan(decimal.Zero) {
+				txOutputs1 = append(txOutputs1, sqldb.SpentInfo{OutputIndex: outputIndex, OutputKeyId: fromID, OutputValue: totalAmount1.String(), BlockId: blockId, Ecosystem: ecosystem1}) // The change
+				outputIndex++
+			}
+
+			if len(txInputs1) > 0 && len(txOutputs1) > 0 {
+				sqldb.PutAllOutputsMap(txInputs1, txInputsMap)
+				sqldb.PutAllOutputsMap(txOutputs1, txOutputsMap)
+			}
+
+		}
+		// rule : taxes ecosystem 2
+		{
+			ecosystem2 := ecosystem
+			var money2 = decimal.Zero
+			var fuelRate2 = decimal.Zero
+			var taxes2 = decimal.Zero
+			if ret, ok := fuels[ecosystem2]; ok {
+
+				fuelRate2, err = decimal.NewFromString(ret)
+				if err != nil {
+					return false, err
+				}
+				//	ecosystem fuelRate /10 *( bit + len(input))
+				money2 = fuelRate2.Div(decimal.NewFromInt(10)).Mul(decimal.NewFromInt(sc.TxSize).Add(decimal.NewFromInt(int64(len(txInputs)))))
+
+				if money2.GreaterThan(totalAmount) {
+					money2 = totalAmount
+				}
+				taxes2 = money2.Mul(decimal.NewFromInt(TaxesSize)).Div(decimal.New(100, 0)).Floor()
+			}
+			if money2.GreaterThan(decimal.Zero) && taxes2.GreaterThan(decimal.Zero) {
+				if taxesWallet, ok := wallets[ecosystem2]; ok {
+					taxesID := converter.StrToInt64(taxesWallet)
+
+					flag = true
+					// 97%
+					txOutputs = append(txOutputs, sqldb.SpentInfo{OutputIndex: outputIndex, OutputKeyId: sc.BlockHeader.KeyId, OutputValue: money2.Sub(taxes2).String(),
+						BlockId: blockId, Ecosystem: ecosystem2})
+					outputIndex++
+					// 3%
+					txOutputs = append(txOutputs, sqldb.SpentInfo{OutputIndex: outputIndex, OutputKeyId: taxesID, OutputValue: taxes2.String(),
+						BlockId: blockId, Ecosystem: ecosystem2})
+					outputIndex++
+					totalAmount = totalAmount.Sub(money2)
+
+				}
+			}
+		}
+
+	}
+
+	// if : ecosystem = 1 , rule : taxes ecosystem 1
+	if ecosystem == consts.DefaultTokenEcosystem {
+		ecosystem1 := int64(consts.DefaultTokenEcosystem)
+		var money1 = decimal.Zero
+		var fuelRate1 = decimal.Zero
+		var taxes1 = decimal.Zero
+		if ret, ok := fuels[ecosystem1]; ok {
+
+			fuelRate1, err = decimal.NewFromString(ret)
+			if err != nil {
+				return false, err
+			} else {
+				//	ecosystem fuelRate /10 *( bit + len(input))
+				money1 = fuelRate1.Div(decimal.NewFromInt(10)).Mul(decimal.NewFromInt(sc.TxSize).Add(decimal.NewFromInt(int64(len(txInputs)))))
+				if money1.GreaterThan(totalAmount) {
+					money1 = totalAmount
+				}
+				taxes1 = money1.Mul(decimal.NewFromInt(TaxesSize)).Div(decimal.New(100, 0)).Floor()
+			}
+		}
+		if money1.GreaterThan(decimal.Zero) && taxes1.GreaterThan(decimal.Zero) {
+			if taxesWallet, ok := wallets[ecosystem1]; ok {
+				taxesID := converter.StrToInt64(taxesWallet)
+
+				flag = true
+				// 97%
+				txOutputs = append(txOutputs, sqldb.SpentInfo{OutputIndex: outputIndex, OutputKeyId: sc.BlockHeader.KeyId, OutputValue: money1.Sub(taxes1).String(),
+					BlockId: blockId, Ecosystem: ecosystem1})
+				outputIndex++
+				// 3%
+				txOutputs = append(txOutputs, sqldb.SpentInfo{OutputIndex: outputIndex, OutputKeyId: taxesID, OutputValue: taxes1.String(),
+					BlockId: blockId, Ecosystem: ecosystem1})
+				outputIndex++
+				totalAmount = totalAmount.Sub(money1)
+
+			}
+		}
+
+	}
+
+	payValue, _ := decimal.NewFromString(value)
+	if totalAmount.GreaterThanOrEqual(payValue) && payValue.GreaterThan(decimal.Zero) {
+		flag = true // The transfer was successful
+		txOutputs = append(txOutputs, sqldb.SpentInfo{OutputIndex: outputIndex, OutputKeyId: toID, OutputValue: value, BlockId: blockId, Ecosystem: ecosystem})
+		outputIndex++
+		totalAmount = totalAmount.Sub(payValue)
+	} else {
+		flag = false
+		err = fmt.Errorf(eEcoCurrentBalance, converter.IDToAddress(fromID), ecosystem)
+	}
+
+	// The change
+	if totalAmount.GreaterThan(decimal.Zero) {
+		txOutputs = append(txOutputs, sqldb.SpentInfo{OutputIndex: outputIndex, OutputKeyId: fromID, OutputValue: totalAmount.String(), BlockId: blockId, Ecosystem: ecosystem}) // The change
+		outputIndex++
+	}
+	if len(txInputs) > 0 && len(txOutputs) > 0 {
+		sqldb.PutAllOutputsMap(txInputs, txInputsMap)
+		sqldb.PutAllOutputsMap(txOutputs, txOutputsMap)
+	}
+	sc.TxInputsMap = txInputsMap
+	sc.TxOutputsMap = txOutputsMap
+	return flag, err
 }

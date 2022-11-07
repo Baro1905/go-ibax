@@ -22,7 +22,7 @@ var (
 
 // RollbackBlock is blocking rollback
 func RollbackBlock(data []byte) error {
-	bl, err := block.UnmarshallBlock(bytes.NewBuffer(data), true)
+	bl, err := block.UnmarshallBlock(bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}
@@ -32,37 +32,37 @@ func RollbackBlock(data []byte) error {
 		return err
 	}
 
-	if b.ID != bl.Header.BlockID {
+	if b.ID != bl.Header.BlockId {
 		return ErrLastBlock
 	}
 
-	dbTransaction, err := sqldb.StartTransaction()
+	dbTx, err := sqldb.StartTransaction()
 	if err != nil {
 		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("starting transaction")
 		return err
 	}
 
-	err = rollbackBlock(dbTransaction, bl)
+	err = rollbackBlock(dbTx, bl)
 	if err != nil {
-		dbTransaction.Rollback()
+		dbTx.Rollback()
 		return err
 	}
 
-	if err = b.DeleteById(dbTransaction, bl.Header.BlockID); err != nil {
+	if err = b.DeleteById(dbTx, bl.Header.BlockId); err != nil {
 		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("deleting block by id")
-		dbTransaction.Rollback()
+		dbTx.Rollback()
 		return err
 	}
 
 	b = &sqldb.BlockChain{}
-	if _, err = b.Get(bl.Header.BlockID - 1); err != nil {
-		dbTransaction.Rollback()
+	if _, err = b.Get(bl.Header.BlockId - 1); err != nil {
+		dbTx.Rollback()
 		return err
 	}
 
-	bl, err = block.UnmarshallBlock(bytes.NewBuffer(b.Data), false)
+	bl, err = block.UnmarshallBlock(bytes.NewBuffer(b.Data))
 	if err != nil {
-		dbTransaction.Rollback()
+		dbTx.Rollback()
 		return err
 	}
 
@@ -73,51 +73,51 @@ func RollbackBlock(data []byte) error {
 		NodePosition:   strconv.Itoa(int(b.NodePosition)),
 		KeyID:          b.KeyID,
 		Time:           b.Time,
-		CurrentVersion: strconv.Itoa(bl.Header.Version),
+		CurrentVersion: strconv.Itoa(int(bl.Header.Version)),
 	}
-	err = ib.Update(dbTransaction)
+	err = ib.Update(dbTx)
 	if err != nil {
-		dbTransaction.Rollback()
+		dbTx.Rollback()
 		return err
 	}
 
-	return dbTransaction.Commit()
+	return dbTx.Commit()
 }
 
-func rollbackBlock(dbTransaction *sqldb.DbTransaction, block *block.Block) error {
+func rollbackBlock(dbTx *sqldb.DbTransaction, block *block.Block) error {
 	// rollback transactions in reverse order
 	logger := block.GetLogger()
 	for i := len(block.Transactions) - 1; i >= 0; i-- {
 		t := block.Transactions[i]
-		t.DbTransaction = dbTransaction
+		t.DbTransaction = dbTx
 
-		_, err := sqldb.MarkTransactionUnusedAndUnverified(dbTransaction, t.TxHash())
+		_, err := sqldb.MarkTransactionUnusedAndUnverified(dbTx, t.Hash())
 		if err != nil {
 			logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("starting transaction")
 			return err
 		}
-		_, err = sqldb.DeleteLogTransactionsByHash(dbTransaction, t.TxHash())
+		_, err = sqldb.DeleteLogTransactionsByHash(dbTx, t.Hash())
 		if err != nil {
 			logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("deleting log transactions by hash")
 			return err
 		}
 
 		ts := &sqldb.TransactionStatus{}
-		err = ts.UpdateBlockID(dbTransaction, 0, t.TxHash())
+		err = ts.UpdateBlockID(dbTx, 0, t.Hash())
 		if err != nil {
 			logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("updating block id in transaction status")
 			return err
 		}
 
-		_, err = sqldb.DeleteQueueTxByHash(dbTransaction, t.TxHash())
+		_, err = sqldb.DeleteQueueTxByHash(dbTx, t.Hash())
 		if err != nil {
 			logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("deleting transacion from queue by hash")
 			return err
 		}
 
 		switch t.Inner.(type) {
-		case *transaction.SmartContractTransaction:
-			if err = rollbackTransaction(t.TxHash(), t.DbTransaction, logger); err != nil {
+		case *transaction.SmartTransactionParser:
+			if err = rollbackTransaction(t.Hash(), t.DbTransaction, logger); err != nil {
 				return err
 			}
 		}
@@ -125,6 +125,12 @@ func rollbackBlock(dbTransaction *sqldb.DbTransaction, block *block.Block) error
 		if err != nil {
 			return err
 		}
+	}
+	
+	err := sqldb.RollbackOutputs(block.Header.BlockId, dbTx, logger)
+	if err != nil {
+		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("updating outputs by block id")
+		return err
 	}
 
 	return nil
