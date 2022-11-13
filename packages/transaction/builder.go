@@ -5,48 +5,32 @@
 package transaction
 
 import (
-	"github.com/IBAX-io/go-ibax/packages/common/crypto"
 	"github.com/IBAX-io/go-ibax/packages/consts"
-	"github.com/IBAX-io/go-ibax/packages/converter"
+	"github.com/IBAX-io/go-ibax/packages/smart"
 	"github.com/IBAX-io/go-ibax/packages/storage/sqldb"
 	"github.com/IBAX-io/go-ibax/packages/types"
-	"github.com/vmihailenco/msgpack/v5"
-
 	log "github.com/sirupsen/logrus"
 )
 
-func newTransaction(smartTx types.SmartContract, privateKey []byte, internal bool) (data, hash []byte, err error) {
-	var publicKey []byte
-	if publicKey, err = crypto.PrivateToPublic(privateKey); err != nil {
-		log.WithFields(log.Fields{"type": consts.CryptoError, "error": err}).Error("converting node private key to public")
-		return
+func newTransaction(smartTx types.SmartTransaction, privateKey []byte, internal bool) (data, hash []byte, err error) {
+	stp := &SmartTransactionParser{
+		SmartContract: &smart.SmartContract{TxSmart: new(types.SmartTransaction)},
 	}
-	smartTx.PublicKey = publicKey
-
-	if internal {
-		smartTx.SignedBy = crypto.Address(publicKey)
-	}
-
-	if data, err = msgpack.Marshal(smartTx); err != nil {
+	data, err = stp.BinMarshalWithPrivate(&smartTx, privateKey, internal)
+	if err != nil {
 		log.WithFields(log.Fields{"type": consts.MarshallingError, "error": err}).Error("marshalling smart contract to msgpack")
 		return
 	}
-	hash = crypto.DoubleHash(data)
-	signature, err := crypto.Sign(privateKey, hash)
-	if err != nil {
-		log.WithFields(log.Fields{"type": consts.CryptoError, "error": err}).Error("signing by node private key")
-		return
-	}
-
-	data = append(append([]byte{types.SmartContractTxType}, converter.EncodeLengthPlusData(data)...), converter.EncodeLengthPlusData(signature)...)
+	hash = stp.Hash
 	return
+
 }
 
-func NewInternalTransaction(smartTx types.SmartContract, privateKey []byte) (data, hash []byte, err error) {
+func NewInternalTransaction(smartTx types.SmartTransaction, privateKey []byte) (data, hash []byte, err error) {
 	return newTransaction(smartTx, privateKey, true)
 }
 
-func NewTransaction(smartTx types.SmartContract, privateKey []byte) (data, hash []byte, err error) {
+func NewTransactionInProc(smartTx types.SmartTransaction, privateKey []byte) (data, hash []byte, err error) {
 	return newTransaction(smartTx, privateKey, false)
 }
 

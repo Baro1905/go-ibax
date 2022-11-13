@@ -19,7 +19,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func rollbackUpdatedRow(tx map[string]string, where string, dbTransaction *sqldb.DbTransaction, logger *log.Entry) error {
+func rollbackUpdatedRow(tx map[string]string, where string, dbTx *sqldb.DbTransaction, logger *log.Entry) error {
 	var rollbackInfo map[string]string
 	if err := json.Unmarshal([]byte(tx["data"]), &rollbackInfo); err != nil {
 		logger.WithFields(log.Fields{"type": consts.JSONUnmarshallError, "error": err}).Error("unmarshalling rollback.Data from json")
@@ -27,6 +27,7 @@ func rollbackUpdatedRow(tx map[string]string, where string, dbTransaction *sqldb
 	}
 	addSQLUpdate := ""
 	for k, v := range rollbackInfo {
+		k = `"` + strings.Trim(k, `"`) + `"`
 		if v == "NULL" {
 			addSQLUpdate += k + `=NULL,`
 		} else if syspar.IsByteColumn(tx["table_name"], k) && len(v) != 0 {
@@ -36,24 +37,24 @@ func rollbackUpdatedRow(tx map[string]string, where string, dbTransaction *sqldb
 		}
 	}
 	addSQLUpdate = addSQLUpdate[0 : len(addSQLUpdate)-1]
-	if err := dbTransaction.Update(tx["table_name"], addSQLUpdate, where); err != nil {
+	if err := dbTx.Update(tx["table_name"], addSQLUpdate, where); err != nil {
 		logger.WithFields(log.Fields{"type": consts.JSONUnmarshallError, "error": err, "rollback_id": tx["id"], "block_id": tx["block_id"], "update": addSQLUpdate, "where": where}).Error("updating table for rollback ")
 		return err
 	}
 	return nil
 }
 
-func rollbackInsertedRow(tx map[string]string, where string, dbTransaction *sqldb.DbTransaction, logger *log.Entry) error {
-	if err := dbTransaction.Delete(tx["table_name"], where); err != nil {
+func rollbackInsertedRow(tx map[string]string, where string, dbTx *sqldb.DbTransaction, logger *log.Entry) error {
+	if err := dbTx.Delete(tx["table_name"], where); err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err, "rollback_id": tx["id"], "table": tx["table_name"], "where": where}).Error("deleting from table for rollback")
 		return err
 	}
 	return nil
 }
 
-func rollbackTransaction(txHash []byte, dbTransaction *sqldb.DbTransaction, logger *log.Entry) error {
+func rollbackTransaction(txHash []byte, dbTx *sqldb.DbTransaction, logger *log.Entry) error {
 	rollbackTx := &sqldb.RollbackTx{}
-	txs, err := rollbackTx.GetRollbackTransactions(dbTransaction, txHash)
+	txs, err := rollbackTx.GetRollbackTransactions(dbTx, txHash)
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("getting rollback transactions")
 		return err
@@ -68,25 +69,25 @@ func rollbackTransaction(txHash []byte, dbTransaction *sqldb.DbTransaction, logg
 			}
 			switch sysData.Type {
 			case "NewTable":
-				err = smart.SysRollbackTable(dbTransaction, sysData)
+				err = smart.SysRollbackTable(dbTx, sysData)
 			case "NewView":
-				err = smart.SysRollbackView(dbTransaction, sysData)
+				err = smart.SysRollbackView(dbTx, sysData)
 			case "NewColumn":
-				err = smart.SysRollbackColumn(dbTransaction, sysData)
+				err = smart.SysRollbackColumn(dbTx, sysData)
 			case "NewContract":
 				err = smart.SysRollbackNewContract(sysData, tx["table_id"])
 			case "EditContract":
-				err = smart.SysRollbackEditContract(dbTransaction, sysData, tx["table_id"])
+				err = smart.SysRollbackEditContract(dbTx, sysData, tx["table_id"])
 			case "NewEcosystem":
-				err = smart.SysRollbackEcosystem(dbTransaction, sysData)
+				err = smart.SysRollbackEcosystem(dbTx, sysData)
 			case "ActivateContract":
 				err = smart.SysRollbackActivate(sysData)
 			case "DeactivateContract":
 				err = smart.SysRollbackDeactivate(sysData)
 			case "DeleteColumn":
-				err = smart.SysRollbackDeleteColumn(dbTransaction, sysData)
+				err = smart.SysRollbackDeleteColumn(dbTx, sysData)
 			case "DeleteTable":
-				err = smart.SysRollbackDeleteTable(dbTransaction, sysData)
+				err = smart.SysRollbackDeleteTable(dbTx, sysData)
 			}
 			if err != nil {
 				return err
@@ -116,7 +117,7 @@ func rollbackTransaction(txHash []byte, dbTransaction *sqldb.DbTransaction, logg
 				isFirstTable = true
 			}
 		}
-		where := " WHERE id='"
+		where := ` WHERE "id"='`
 
 		if len(tx["data"]) <= 0 {
 			if isFirstTable {
@@ -132,23 +133,23 @@ func rollbackTransaction(txHash []byte, dbTransaction *sqldb.DbTransaction, logg
 			where += tx["table_id"] + `'`
 		}
 		if isFirstTable {
-			where += fmt.Sprintf(` AND ecosystem='%d'`, converter.StrToInt64(ecoID))
+			where += fmt.Sprintf(` AND "ecosystem"='%d'`, converter.StrToInt64(ecoID))
 			tx[`table_name`] = `1_` + keyName
 		} else {
 			where += tx["table_id"] + `'`
 		}
 		if len(tx["data"]) > 0 {
-			if err := rollbackUpdatedRow(tx, where, dbTransaction, logger); err != nil {
+			if err := rollbackUpdatedRow(tx, where, dbTx, logger); err != nil {
 				return err
 			}
 		} else {
-			if err := rollbackInsertedRow(tx, where, dbTransaction, logger); err != nil {
+			if err := rollbackInsertedRow(tx, where, dbTx, logger); err != nil {
 				return err
 			}
 		}
 	}
 	txForDelete := &sqldb.RollbackTx{TxHash: txHash}
-	err = txForDelete.DeleteByHash(dbTransaction)
+	err = txForDelete.DeleteByHash(dbTx)
 	if err != nil {
 		logger.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("deleting rollback transaction by hash")
 		return err

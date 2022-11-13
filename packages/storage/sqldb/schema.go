@@ -3,9 +3,10 @@ package sqldb
 import (
 	"encoding/hex"
 	"fmt"
-	"github.com/IBAX-io/go-ibax/packages/common/crypto"
 	"os"
 	"path/filepath"
+
+	"github.com/IBAX-io/go-ibax/packages/common/crypto"
 
 	"github.com/IBAX-io/go-ibax/packages/conf"
 	"github.com/IBAX-io/go-ibax/packages/consts"
@@ -17,38 +18,38 @@ import (
 )
 
 // ExecSchemaEcosystem is executing ecosystem schema
-func ExecSchemaEcosystem(db *DbTransaction, id int, wallet int64, name string, founder, appID int64) error {
-	if id == 1 {
+func ExecSchemaEcosystem(db *DbTransaction, data migration.SqlData) error {
+	if data.Ecosystem == 1 {
 		q, err := migration.GetCommonEcosystemScript()
 		if err != nil {
 			return err
 		}
-		if err := GetDB(db).Exec(q).Error; err != nil {
+		if err := db.ExecSql(q); err != nil {
 			log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("executing comma ecosystem schema")
 			return err
 		}
 	}
-	q, err := migration.GetEcosystemScript(id, wallet, name, founder, appID)
+	q, err := migration.GetEcosystemScript(data)
 	if err != nil {
 		return err
 	}
-	if err := GetDB(db).Exec(q).Error; err != nil {
+	if err := db.ExecSql(q); err != nil {
 		log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("executing ecosystem schema")
 		return err
 	}
-	if id == 1 {
-		q, err = migration.GetFirstEcosystemScript(wallet)
+	if data.Ecosystem == 1 {
+		q, err = migration.GetFirstEcosystemScript(data)
 		if err != nil {
 			return err
 		}
-		if err := GetDB(db).Exec(q).Error; err != nil {
+		if err := db.ExecSql(q); err != nil {
 			log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("executing first ecosystem schema")
 		}
-		q, err = migration.GetFirstTableScript(id)
+		q, err = migration.GetFirstTableScript(data)
 		if err != nil {
 			return err
 		}
-		if err := GetDB(db).Exec(q).Error; err != nil {
+		if err := db.ExecSql(q); err != nil {
 			log.WithFields(log.Fields{"type": consts.DBError, "error": err}).Error("executing first tables schema")
 		}
 	}

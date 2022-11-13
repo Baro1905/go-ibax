@@ -10,7 +10,7 @@ INSERT INTO "1_tables" ("id", "name", "permissions","columns", "conditions") VAL
     (next_id('1_tables'), 'delayed_contracts',
         '{
             "insert": "ContractAccess(\"@1NewDelayedContract\")",
-            "update": "ContractAccess(\"@1CallDelayedContract\",\"@1EditDelayedContract\")",
+            "update": "ContractAccess(\"@1CallDelayedContract\",\"@1EditDelayedContract\",\"@1CheckNodesBan\")",
             "new_column": "ContractConditions(\"@1MainCondition\")"
         }',
         '{
@@ -18,7 +18,7 @@ INSERT INTO "1_tables" ("id", "name", "permissions","columns", "conditions") VAL
             "key_id": "ContractAccess(\"@1EditDelayedContract\")",
             "block_id": "ContractAccess(\"@1CallDelayedContract\",\"@1EditDelayedContract\")",
             "every_block": "ContractAccess(\"@1EditDelayedContract\")",
-            "counter": "ContractAccess(\"@1CallDelayedContract\",\"@1EditDelayedContract\")",
+            "counter": "ContractAccess(\"@1CallDelayedContract\",\"@1EditDelayedContract\",\"@1CheckNodesBan\")",
             "high_rate": "ContractAccess(\"@1EditDelayedContract\")",
             "limit": "ContractAccess(\"@1EditDelayedContract\")",
             "deleted": "ContractAccess(\"@1EditDelayedContract\")",
@@ -29,31 +29,33 @@ INSERT INTO "1_tables" ("id", "name", "permissions","columns", "conditions") VAL
     (next_id('1_tables'), 'ecosystems',
         '{
             "insert": "ContractAccess(\"@1NewEcosystem\")",
-            "update": "ContractAccess(\"@1EditEcosystemName\",\"@1VotingVesAccept\",\"@1EcManageInfo\",\"@1NewToken\",\"@1TeChange\",\"@1TeBurn\")",
+            "update": "ContractAccess(\"@1EditEcosystemName\",\"@1VotingVesAccept\",\"@1EcManageInfo\",\"@1EcoFeeModeManage\",\"@1EditControlMode\",\"@1NewToken\",\"@1TeChange\",\"@1TeBurn\")",
             "new_column": "ContractConditions(\"@1MainCondition\")"
         }',
         '{
             "name": "ContractAccess(\"@1EditEcosystemName\")",
             "info": "ContractAccess(\"@1EcManageInfo\")",
+            "fee_mode_info": "ContractAccess(\"@1EcoFeeModeManage\")",
             "is_valued": "ContractAccess(\"@1VotingVesAccept\")",
             "emission_amount": "ContractAccess(\"@1NewToken\",\"@1TeBurn\")",
             "token_symbol": "ContractAccess(\"@1NewToken\")",
             "token_name": "ContractAccess(\"@1NewToken\")",
             "type_emission": "ContractAccess(\"@1NewToken\",\"@1TeChange\")",
-            "type_withdraw": "ContractAccess(\"@1NewToken\",\"@1TeChange\")"
+            "type_withdraw": "ContractAccess(\"@1NewToken\",\"@1TeChange\")",
+            "control_mode": "ContractAccess(\"@1EditControlMode\")"
         }',
         'ContractConditions("@1MainCondition")'
     ),
-    (next_id('1_tables'), 'system_parameters',
+    (next_id('1_tables'), 'platform_parameters',
         '{
             "insert": "false",
-            "update": "ContractAccess(\"@1UpdateSysParam\")",
+            "update": "ContractAccess(\"@1UpdatePlatformParam\")",
             "new_column": "ContractConditions(\"@1MainCondition\")"
         }',
         '{
-            "value": "ContractAccess(\"@1UpdateSysParam\")",
+            "value": "ContractAccess(\"@1UpdatePlatformParam\")",
             "name": "false",
-            "conditions": "ContractAccess(\"@1UpdateSysParam\")"
+            "conditions": "ContractAccess(\"@1UpdatePlatformParam\")"
         }',
         'ContractConditions("@1MainCondition")'
     ),

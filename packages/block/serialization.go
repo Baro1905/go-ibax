@@ -7,127 +7,103 @@ package block
 
 import (
 	"bytes"
-	"fmt"
 
-	"github.com/IBAX-io/go-ibax/packages/common/crypto"
+	"github.com/IBAX-io/go-ibax/packages/storage/sqldb"
+	"github.com/IBAX-io/go-ibax/packages/utils"
+	"github.com/pkg/errors"
+
 	"github.com/IBAX-io/go-ibax/packages/conf/syspar"
-	"github.com/IBAX-io/go-ibax/packages/consts"
-	"github.com/IBAX-io/go-ibax/packages/converter"
 	"github.com/IBAX-io/go-ibax/packages/transaction"
 	"github.com/IBAX-io/go-ibax/packages/types"
-	"github.com/IBAX-io/go-ibax/packages/utils"
-
-	log "github.com/sirupsen/logrus"
 )
 
-// MarshallBlock is marshalling block
-func MarshallBlock(header *types.BlockData, trData [][]byte, prev *types.BlockData, key string) ([]byte, error) {
-	var mrklArray [][]byte
-	var blockDataTx []byte
-	var signed []byte
-	logger := log.WithFields(log.Fields{"block_id": header.BlockID, "block_hash": header.Hash, "block_time": header.Time, "block_version": header.Version, "block_wallet_id": header.KeyID, "block_state_id": header.EcosystemID})
-
-	for _, tr := range trData {
-		mrklArray = append(mrklArray, converter.BinToHex(crypto.DoubleHash(tr)))
-		blockDataTx = append(blockDataTx, converter.EncodeLengthPlusData(tr)...)
+func (b *Block) repeatMarshallBlock() error {
+	newBlockData, err := MarshallBlock(
+		types.WithCurHeader(b.Header),
+		types.WithPrevHeader(b.PrevHeader),
+		types.WithAfterTxs(b.AfterTxs),
+		types.WithSysUpdate(b.SysUpdate),
+		types.WithTxFullData(b.TxFullData))
+	if err != nil {
+		return errors.Wrap(err, "marshalling repeat block")
 	}
 
-	if key != "" {
-		if len(mrklArray) == 0 {
-			mrklArray = append(mrklArray, []byte("0"))
-		}
-		mrklRoot, err := utils.MerkleTreeRoot(mrklArray)
-		if err != nil {
-			return nil, err
-		}
-		signSource := header.ForSign(prev, mrklRoot)
-		signed, err = crypto.SignString(key, signSource)
-		if err != nil {
-			logger.WithFields(log.Fields{"type": consts.CryptoError, "error": err}).Error("signing block")
-			return nil, err
-		}
+	var nb = new(Block)
+	nb, err = UnmarshallBlock(bytes.NewBuffer(newBlockData))
+	if err != nil {
+		return errors.Wrap(err, "parsing repeat block")
 	}
-
-	buf := new(bytes.Buffer)
-
-	// fill header
-	buf.Write(converter.DecToBin(header.Version, 2))
-	buf.Write(converter.DecToBin(header.BlockID, 4))
-	buf.Write(converter.DecToBin(header.Time, 4))
-	buf.Write(converter.DecToBin(header.EcosystemID, 4))
-	buf.Write(converter.EncodeLenInt64InPlace(header.KeyID))
-	buf.Write(converter.DecToBin(header.NodePosition, 1))
-	buf.Write(converter.EncodeLengthPlusData(prev.RollbacksHash))
-
-	// fill signature
-	buf.Write(converter.EncodeLengthPlusData(signed))
-
-	// data
-	buf.Write(blockDataTx)
-
-	return buf.Bytes(), nil
+	b.BinData = newBlockData
+	b.Transactions = nb.Transactions
+	b.MerkleRoot = nb.MerkleRoot
+	return nil
 }
 
-func UnmarshallBlock(blockBuffer *bytes.Buffer, fillData bool) (*Block, error) {
-	header, prev, err := types.ParseBlockHeader(blockBuffer, syspar.GetMaxBlockSize())
-	if err != nil {
+func MarshallBlock(opts ...types.BlockDataOption) ([]byte, error) {
+	block := &types.BlockData{}
+	if err := block.Apply(opts...); err != nil {
+		return nil, err
+	}
+	return block.MarshallBlock(syspar.GetNodePrivKey())
+}
+
+func UnmarshallBlock(blockBuffer *bytes.Buffer) (*Block, error) {
+	var (
+		contractNames  []string
+		classifyTxsMap = make(map[int][]*transaction.Transaction)
+		block          = &types.BlockData{}
+	)
+	if err := block.UnmarshallBlock(blockBuffer.Bytes()); err != nil {
 		return nil, err
 	}
 
-	logger := log.WithFields(log.Fields{"block_id": header.BlockID, "block_time": header.Time, "block_wallet_id": header.KeyID,
-		"block_state_id": header.EcosystemID, "block_hash": header.Hash, "block_version": header.Version})
+	if block.Header.BlockId != 1 {
+		allDelayedContract, err := sqldb.GetAllDelayedContract()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, contract := range allDelayedContract {
+			contractNames = append(contractNames, contract.Contract)
+		}
+	}
+
 	transactions := make([]*transaction.Transaction, 0)
-
-	var mrklSlice [][]byte
-
-	// parse transactions
-	for blockBuffer.Len() > 0 {
-		transactionSize, err := converter.DecodeLengthBuf(blockBuffer)
+	for i := 0; i < len(block.TxFullData); i++ {
+		tx, err := transaction.UnmarshallTransaction(bytes.NewBuffer(block.TxFullData[i]))
 		if err != nil {
-			logger.WithFields(log.Fields{"type": consts.UnmarshallingError, "error": err}).Error("transaction size is 0")
-			return nil, fmt.Errorf("bad block format (%s)", err)
+			return nil, err
 		}
-		if blockBuffer.Len() < transactionSize {
-			logger.WithFields(log.Fields{"size": blockBuffer.Len(), "match_size": int(transactionSize), "type": consts.SizeDoesNotMatch}).Error("transaction size does not matches encoded length")
-			return nil, fmt.Errorf("bad block format (transaction len is too big: %d)", transactionSize)
+		if tx.Type() == types.StopNetworkTxType {
+			classifyTxsMap[types.StopNetworkTxType] = append(classifyTxsMap[types.StopNetworkTxType], tx)
+			transactions = append(transactions, tx)
+			continue
 		}
-
-		if transactionSize == 0 {
-			logger.WithFields(log.Fields{"type": consts.EmptyObject}).Error("transaction size is 0")
-			return nil, fmt.Errorf("transaction size is 0")
-		}
-
-		bufTransaction := bytes.NewBuffer(blockBuffer.Next(transactionSize))
-		t, err := transaction.UnmarshallTransaction(bufTransaction, fillData)
-		if err != nil {
-			if t != nil && t.TxHash() != nil {
-				transaction.MarkTransactionBad(t.DbTransaction, t.TxHash(), err.Error())
+		if tx.IsSmartContract() {
+			if tx.Type() == types.TransferSelfTxType {
+				classifyTxsMap[types.TransferSelfTxType] = append(classifyTxsMap[types.TransferSelfTxType], tx)
+				transactions = append(transactions, tx)
+				continue
 			}
-			return nil, fmt.Errorf("parse transaction error(%s)", err)
+			if tx.Type() == types.UtxoTxType {
+				classifyTxsMap[types.UtxoTxType] = append(classifyTxsMap[types.UtxoTxType], tx)
+				transactions = append(transactions, tx)
+				continue
+			}
+			if utils.StringInSlice(contractNames, tx.SmartContract().TxContract.Name) {
+				classifyTxsMap[types.DelayTxType] = append(classifyTxsMap[types.DelayTxType], tx)
+				transactions = append(transactions, tx)
+				continue
+			}
+			classifyTxsMap[types.SmartContractTxType] = append(classifyTxsMap[types.SmartContractTxType], tx)
 		}
-		t.BlockData = &header
-
-		transactions = append(transactions, t)
-
-		// build merkle tree
-		if len(t.FullData) > 0 {
-			doubleHash := crypto.DoubleHash(t.FullData)
-			doubleHash = converter.BinToHex(doubleHash)
-			mrklSlice = append(mrklSlice, doubleHash)
-		}
+		transactions = append(transactions, tx)
 	}
 
-	if len(mrklSlice) == 0 {
-		mrklSlice = append(mrklSlice, []byte("0"))
-	}
-	mrkl, err := utils.MerkleTreeRoot(mrklSlice)
-	if err != nil {
-		return nil, err
-	}
 	return &Block{
-		Header:            header,
-		PrevRollbacksHash: prev.RollbacksHash,
+		BlockData:         block,
+		PrevRollbacksHash: block.PrevHeader.RollbacksHash,
+		ClassifyTxsMap:    classifyTxsMap,
 		Transactions:      transactions,
-		MrklRoot:          mrkl,
 	}, nil
 }

@@ -145,14 +145,14 @@ func (nbs *NodesBanService) newBadBlock(producer syspar.HonorNode, blockId, bloc
 	contract := smart.VMGetContract(vm, "NewBadBlock", 1)
 	info := contract.Info()
 
-	sc := types.SmartContract{
+	sc := types.SmartTransaction{
 		Header: &types.Header{
 			ID:          int(info.ID),
-			Time:        time.Now().Unix(),
 			EcosystemID: 1,
+			Time:        time.Now().Unix(),
 			KeyID:       conf.Config.KeyID,
 		},
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"ProducerNodeID": crypto.Address(producer.PublicKey),
 			"ConsumerNodeID": crypto.Address(currentNode.PublicKey),
 			"BlockID":        blockId,
@@ -161,12 +161,14 @@ func (nbs *NodesBanService) newBadBlock(producer syspar.HonorNode, blockId, bloc
 		},
 	}
 
-	txData, txHash, err := transaction.NewInternalTransaction(sc, syspar.GetNodePrivKey())
+	stp := &transaction.SmartTransactionParser{
+		SmartContract: &smart.SmartContract{TxSmart: new(types.SmartTransaction)},
+	}
+	txData, err := stp.BinMarshalWithPrivate(&sc, syspar.GetNodePrivKey(), true)
 	if err != nil {
 		return err
 	}
-
-	return transaction.CreateTransaction(txData, txHash, conf.Config.KeyID, sc.Time)
+	return transaction.CreateTransaction(txData, stp.Hash, conf.Config.KeyID, stp.Timestamp)
 }
 
 func (nbs *NodesBanService) FilterHosts(hosts []string) ([]string, []string, error) {
