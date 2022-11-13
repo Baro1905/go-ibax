@@ -21,11 +21,11 @@ const (
 	contextKeyClient
 )
 
-func setContext(r *http.Request, key, value any) *http.Request {
+func setContext(r *http.Request, key, value interface{}) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), key, value))
 }
 
-func getContext(r *http.Request, key any) any {
+func getContext(r *http.Request, key interface{}) interface{} {
 	return r.Context().Value(key)
 }
 

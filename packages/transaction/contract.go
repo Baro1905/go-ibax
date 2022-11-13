@@ -21,7 +21,7 @@ const (
 	errUnknownContract = `Cannot find %s contract`
 )
 
-func CreateContract(contractName string, keyID int64, params map[string]any,
+func CreateContract(contractName string, keyID int64, params map[string]interface{},
 	privateKey []byte) error {
 	ecosysID, _ := converter.ParseName(contractName)
 	if ecosysID == 0 {
@@ -31,21 +31,21 @@ func CreateContract(contractName string, keyID int64, params map[string]any,
 	if contract == nil {
 		return fmt.Errorf(errUnknownContract, contractName)
 	}
-	sc := types.SmartTransaction{
+	sc := types.SmartContract{
 		Header: &types.Header{
 			ID:          int(contract.Info().ID),
+			Time:        time.Now().Unix(),
 			EcosystemID: ecosysID,
 			KeyID:       keyID,
-			Time:        time.Now().Unix(),
 			NetworkID:   conf.Config.LocalConf.NetworkID,
 		},
 		Params: params,
 	}
-	txData, _, err := NewTransactionInProc(sc, privateKey)
+	txData, _, err := NewTransaction(sc, privateKey)
 	if err == nil {
 		rtx := &Transaction{}
 		if err = rtx.Unmarshall(bytes.NewBuffer(txData)); err == nil {
-			//err = sqldb.SendTx(rtx, sc.KeyId)
+			//err = sqldb.SendTx(rtx, sc.KeyID)
 			err = sqldb.SendTxBatches([]*sqldb.RawTx{rtx.SetRawTx()})
 		}
 	}

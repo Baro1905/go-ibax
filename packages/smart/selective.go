@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/IBAX-io/go-ibax/packages/common/crypto"
 	"github.com/IBAX-io/go-ibax/packages/consts"
 	"github.com/IBAX-io/go-ibax/packages/storage/sqldb"
 	"github.com/IBAX-io/go-ibax/packages/storage/sqldb/querycost"
@@ -19,20 +18,23 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func addRollback(sc *SmartContract, table, tableID, rollbackInfoStr, rollDataHashStr string) error {
-	rollbackTx := &types.RollbackTx{
-		BlockId:   sc.BlockHeader.BlockId,
-		TxHash:    sc.Hash,
+func addRollback(sc *SmartContract, table, tableID, rollbackInfoStr string) error {
+	rollbackTx := &sqldb.RollbackTx{
+		BlockID:   sc.BlockData.BlockID,
+		TxHash:    sc.TxHash,
 		NameTable: table,
-		TableId:   tableID,
+		TableID:   tableID,
 		Data:      rollbackInfoStr,
-		DataHash:  crypto.Hash([]byte(rollDataHashStr)),
 	}
 	sc.RollBackTx = append(sc.RollBackTx, rollbackTx)
+	err := rollbackTx.Create(sc.DbTransaction)
+	if err != nil {
+		return logErrorDB(err, "creating rollback tx")
+	}
 	return nil
 }
 
-func (sc *SmartContract) selectiveLoggingAndUpd(fields []string, ivalues []any,
+func (sc *SmartContract) selectiveLoggingAndUpd(fields []string, ivalues []interface{},
 	table string, inWhere *types.Map, generalRollback bool, exists bool) (int64, string, error) {
 
 	var (
@@ -42,7 +44,7 @@ func (sc *SmartContract) selectiveLoggingAndUpd(fields []string, ivalues []any,
 	)
 
 	logger := sc.GetLogger()
-	if generalRollback && sc.BlockHeader == nil {
+	if generalRollback && sc.BlockData == nil {
 		logger.WithFields(log.Fields{"type": consts.EmptyObject}).Error("Block is undefined")
 		return 0, ``, fmt.Errorf(`it is impossible to write to DB when Block is undefined`)
 	}
@@ -63,7 +65,7 @@ func (sc *SmartContract) selectiveLoggingAndUpd(fields []string, ivalues []any,
 	if exists {
 		selectQuery, err := sqlBuilder.GetSelectExpr()
 		if err != nil {
-			logger.WithError(err).Error("on getting sql select statement")
+			logger.WithFields(log.Fields{"error": err}).Error("on getting sql select statement")
 			return 0, "", err
 		}
 
@@ -89,25 +91,24 @@ func (sc *SmartContract) selectiveLoggingAndUpd(fields []string, ivalues []any,
 			return 0, "", errWhereUpdate
 		}
 	}
-	var rollDataHashStr string
 
 	if !sqlBuilder.Where.IsEmpty() && len(logData) > 0 {
 		var err error
 		rollbackInfoStr, err = sqlBuilder.GenerateRollBackInfoString(logData)
 		if err != nil {
-			logger.WithError(err).Error("on generate rollback info string for update")
+			logger.WithFields(log.Fields{"error": err}).Error("on generate rollback info string for update")
 			return 0, "", err
 		}
 
 		updateExpr, err := sqlBuilder.GetSQLUpdateExpr(logData)
 		if err != nil {
-			logger.WithError(err).Error("on getting update expression for update")
+			logger.WithFields(log.Fields{"error": err}).Error("on getting update expression for update")
 			return 0, "", err
 		}
 
 		whereExpr, err := sqlBuilder.GetSQLWhereExpr()
 		if err != nil {
-			logger.WithError(err).Error("on getting where expression for update")
+			logger.WithFields(log.Fields{"error": err}).Error("on getting where expression for update")
 			return 0, "", err
 		}
 		if !sc.CLB {
@@ -119,7 +120,7 @@ func (sc *SmartContract) selectiveLoggingAndUpd(fields []string, ivalues []any,
 			}
 			cost += updateCost
 		}
-		rollDataHashStr = `UPDATE "` + strings.Trim(sqlBuilder.Table, `"`) + `" SET ` + updateExpr + " " + whereExpr
+
 		err = sc.DbTransaction.Update(sqlBuilder.Table, updateExpr, whereExpr)
 		if err != nil {
 			logger.WithFields(log.Fields{"type": consts.DBError, "error": err, "table": sqlBuilder.Table, "update": updateExpr, "where": whereExpr}).Error("getting update query")
@@ -130,7 +131,7 @@ func (sc *SmartContract) selectiveLoggingAndUpd(fields []string, ivalues []any,
 
 		insertQuery, err := sqlBuilder.GetSQLInsertQuery(sqldb.NextIDGetter{Tx: sc.DbTransaction})
 		if err != nil {
-			logger.WithError(err).Error("on build insert query")
+			logger.WithFields(log.Fields{"error": err}).Error("on build insert query")
 			return 0, "", err
 		}
 
@@ -139,9 +140,9 @@ func (sc *SmartContract) selectiveLoggingAndUpd(fields []string, ivalues []any,
 			logger.WithFields(log.Fields{"type": consts.DBError, "error": err, "query": insertQuery}).Error("getting total query cost for insert query")
 			return 0, "", err
 		}
-		rollDataHashStr = insertQuery
+
 		cost += insertCost
-		err = sc.DbTransaction.ExecSql(insertQuery)
+		err = sqldb.GetDB(sc.DbTransaction).Exec(insertQuery).Error
 		if err != nil {
 			logger.WithFields(log.Fields{"type": consts.DBError, "error": err, "query": insertQuery}).Error("executing insert query")
 			return 0, "", err
@@ -159,26 +160,26 @@ func (sc *SmartContract) selectiveLoggingAndUpd(fields []string, ivalues []any,
 				}
 			}
 		}
-		if err := addRollback(sc, sqlBuilder.Table, tid, rollbackInfoStr, rollDataHashStr); err != nil {
+		if err := addRollback(sc, sqlBuilder.Table, tid, rollbackInfoStr); err != nil {
 			return 0, sqlBuilder.TableID(), err
 		}
 	}
 	return cost, sqlBuilder.TableID(), nil
 }
 
-func (sc *SmartContract) insert(fields []string, ivalues []any,
+func (sc *SmartContract) insert(fields []string, ivalues []interface{},
 	table string) (int64, string, error) {
 	return sc.selectiveLoggingAndUpd(fields, ivalues, table, nil, !sc.CLB && sc.Rollback, false)
 }
 
-func (sc *SmartContract) updateWhere(fields []string, values []any,
+func (sc *SmartContract) updateWhere(fields []string, values []interface{},
 	table string, where *types.Map) (int64, string, error) {
 	return sc.selectiveLoggingAndUpd(fields, values, table, where, !sc.CLB && sc.Rollback, true)
 }
 
-func (sc *SmartContract) update(fields []string, values []any,
-	table string, whereField string, whereValue any) (int64, string, error) {
-	return sc.updateWhere(fields, values, table, types.LoadMap(map[string]any{
+func (sc *SmartContract) update(fields []string, values []interface{},
+	table string, whereField string, whereValue interface{}) (int64, string, error) {
+	return sc.updateWhere(fields, values, table, types.LoadMap(map[string]interface{}{
 		whereField: fmt.Sprint(whereValue)}))
 }
 

@@ -35,11 +35,11 @@ func (c *GlobalConfig) GetPidPath() string {
 // LoadConfig from configFile
 // the function has side effect updating global var Config
 func LoadConfig(path string) error {
+	log.WithFields(log.Fields{"path": path}).Info("Loading config")
 	err := LoadConfigToVar(path, &Config)
 	if err != nil {
-		log.WithError(err).Fatal("Loading config")
+		panic(err)
 	}
-	log.WithFields(log.Fields{"path": path}).Info("Loading config")
 	registerCrypto(Config.CryptoSettings)
 	return nil
 }
@@ -172,12 +172,12 @@ func IpfsHost() string {
 	return Config.IpfsConf.Host
 }
 
-// GetNodesAddr returns address of nodes
+// GetNodesAddr returns addreses of nodes
 func GetNodesAddr() []string {
 	return Config.BootNodes.NodesAddr[:]
 }
 
 func registerCrypto(c CryptoSettings) {
-	crypto.InitAsymAlgo(c.Cryptoer)
-	crypto.InitHashAlgo(c.Hasher)
+	crypto.InitCurve(c.Cryptoer)
+	crypto.InitHash(c.Hasher)
 }

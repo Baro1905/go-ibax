@@ -30,7 +30,11 @@ func NewNodeRelevanceService() *NodeRelevanceService {
 		availableBlockchainGap = syspar.GetRbBlocks1() - consts.AvailableBCGap
 	}
 
-	checkingInterval := syspar.GetMaxBlockTimeDuration() * time.Duration(syspar.GetRbBlocks1()-consts.DefaultNodesConnectDelay)
+	blockGenerationDuration := time.Millisecond * time.Duration(syspar.GetMaxBlockGenerationTime())
+	blocksGapDuration := time.Second * time.Duration(syspar.GetGapsBetweenBlocks())
+	blockGenerationTime := blockGenerationDuration + blocksGapDuration
+
+	checkingInterval := blockGenerationTime * time.Duration(syspar.GetRbBlocks1()-consts.DefaultNodesConnectDelay)
 	return &NodeRelevanceService{
 		availableBlockchainGap: availableBlockchainGap,
 		checkingInterval:       checkingInterval,
@@ -91,20 +95,7 @@ func (n *NodeRelevanceService) checkNodeRelevance(ctx context.Context) (relevant
 	if r {
 		return false, nil
 	}
-	var (
-		remoteHosts []string
-	)
-	if syspar.IsHonorNodeMode() {
-		remoteHosts, err = GetNodesBanService().FilterBannedHosts(syspar.GetRemoteHosts())
-	} else {
-		candidateNodes, err := sqldb.GetCandidateNode(syspar.SysInt(syspar.NumberNodes))
-		if err == nil && len(candidateNodes) > 0 {
-			for _, node := range candidateNodes {
-				remoteHosts = append(remoteHosts, node.TcpAddress)
-			}
-		}
-	}
-
+	remoteHosts, err := GetNodesBanService().FilterBannedHosts(syspar.GetRemoteHosts())
 	if err != nil {
 		return false, err
 	}

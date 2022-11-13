@@ -20,8 +20,6 @@ type InfoBlock struct {
 	CurrentVersion string `gorm:"not null"`
 	Sent           int8   `gorm:"not null"`
 	RollbacksHash  []byte `gorm:"not null"`
-	ConsensusMode  int32  `gorm:"not null"`
-	CandidateNodes []byte `gorm:"not null"`
 }
 
 // TableName returns name of table
@@ -35,8 +33,8 @@ func (ib *InfoBlock) Get() (bool, error) {
 }
 
 // Update is update model
-func (ib *InfoBlock) Update(dbTx *DbTransaction) error {
-	return GetDB(dbTx).Model(&InfoBlock{}).Updates(ib).Error
+func (ib *InfoBlock) Update(transaction *DbTransaction) error {
+	return GetDB(transaction).Model(&InfoBlock{}).Updates(ib).Error
 }
 
 // GetUnsent is retrieving model from database
@@ -45,8 +43,8 @@ func (ib *InfoBlock) GetUnsent() (bool, error) {
 }
 
 // Create is creating record of model
-func (ib *InfoBlock) Create(dbTx *DbTransaction) error {
-	return GetDB(dbTx).Create(ib).Error
+func (ib *InfoBlock) Create(transaction *DbTransaction) error {
+	return GetDB(transaction).Create(ib).Error
 }
 
 // MarkSent update model sent field
@@ -55,8 +53,8 @@ func (ib *InfoBlock) MarkSent() error {
 }
 
 // UpdRollbackHash update model rollbacks_hash field
-func UpdRollbackHash(dbTx *DbTransaction, hash []byte) error {
-	return GetDB(dbTx).Model(&InfoBlock{}).Update("rollbacks_hash", hash).Error
+func UpdRollbackHash(transaction *DbTransaction, hash []byte) error {
+	return GetDB(transaction).Model(&InfoBlock{}).Update("rollbacks_hash", hash).Error
 }
 
 // BlockGetUnsent returns InfoBlock

@@ -11,24 +11,24 @@ import (
 )
 
 type ConcurrentMap struct {
-	m  map[string]any
+	m  map[string]interface{}
 	mu sync.RWMutex
 }
 
-func (c *ConcurrentMap) Set(key string, value any) {
+func (c *ConcurrentMap) Set(key string, value interface{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.m[key] = value
 }
 
-func (c *ConcurrentMap) Get(key string) (bool, any) {
+func (c *ConcurrentMap) Get(key string) (bool, interface{}) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	res, ok := c.m[key]
 	return ok, res
 }
 
-func sendGetRequest(url string, v any) error {
+func sendGetRequest(url string, v interface{}) error {
 	resp, err := http.Get(url)
 	if err != nil {
 		log.WithFields(log.Fields{"url": url, "error": err}).Error("get requesting url")

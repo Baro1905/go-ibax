@@ -378,7 +378,7 @@ func filesLs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s := shell.NewShell(conf.IpfsHost())
-	var out any
+	var out interface{}
 	err := s.Request("files/ls").Option("arg", leadingSlash+converter.Int64ToStr(client.KeyID)+form.Paths).Option("l", true).
 		Exec(context.Background(), &out)
 	if err != nil {
@@ -404,7 +404,7 @@ func getFileData(r *http.Request, prefix, key string) error {
 
 	fileByte, _, err := r.FormFile(key)
 	if err != nil {
-		logger.WithError(err).Error("request.FormFile")
+		logger.WithFields(log.Fields{"error": err}).Error("request.FormFile")
 		return err
 	}
 	defer fileByte.Close()
@@ -420,7 +420,7 @@ func getFileData(r *http.Request, prefix, key string) error {
 	//1.Read the amount of data stored in the last copy from the temporary file
 	totalBytes := make([]byte, 100)
 	count1, _ := file3.Read(totalBytes)     // Read the amount of data that has been copied into the array
-	totalStr := string(totalBytes[:count1]) // Get the number of reads from the array,-->string
+	totalStr := string(totalBytes[:count1]) // Get the number of reads from the array，-->string
 	total, _ := strconv.Atoi(totalStr)      //int
 	toltemp := 0
 	//2.

@@ -8,15 +8,8 @@ package daemons
 import (
 	"context"
 	"fmt"
-	"github.com/IBAX-io/go-ibax/packages/transaction"
 	"strings"
 	"time"
-
-	"github.com/IBAX-io/go-ibax/packages/block"
-	"github.com/IBAX-io/go-ibax/packages/types"
-
-	"github.com/IBAX-io/go-ibax/packages/conf/syspar"
-	"github.com/IBAX-io/go-ibax/packages/service/node"
 
 	"github.com/IBAX-io/go-ibax/packages/storage/sqldb"
 
@@ -43,14 +36,13 @@ type daemon struct {
 }
 
 var daemonsList = map[string]func(context.Context, *daemon) error{
-	"BlocksCollection":    BlocksCollection,
-	"BlockGenerator":      BlockGenerator,
-	"Disseminator":        Disseminator,
-	"QueueParserTx":       QueueParserTx,
-	"QueueParserBlocks":   QueueParserBlocks,
-	"Confirmations":       Confirmations,
-	"Scheduler":           Scheduler,
-	"CandidateNodeVoting": CandidateNodeVoting,
+	"BlocksCollection":  BlocksCollection,
+	"BlockGenerator":    BlockGenerator,
+	"Disseminator":      Disseminator,
+	"QueueParserTx":     QueueParserTx,
+	"QueueParserBlocks": QueueParserBlocks,
+	"Confirmations":     Confirmations,
+	"Scheduler":         Scheduler,
 	//"ExternalNetwork":   ExternalNetwork,
 }
 
@@ -107,7 +99,7 @@ func StartDaemons(ctx context.Context, daemonsToStart []string) {
 			daemonNameAndTime := <-MonitorDaemonCh
 			daemonsTable[daemonNameAndTime[0]] = daemonNameAndTime[1]
 			if time.Now().Unix()%10 == 0 {
-				log.Debugf("daemonsTable: %v\n", daemonsTable)
+				log.Debug("daemonsTable: %v\n", daemonsTable)
 			}
 		}
 	}()
@@ -163,7 +155,7 @@ func Ntp_Work(ctx context.Context) {
 					count++
 				}
 				if count > 10 {
-					var sp sqldb.PlatformParameter
+					var sp sqldb.SystemParameter
 					count, err := sp.GetNumberOfHonorNodes()
 					if err != nil {
 						log.WithFields(log.Fields{"Ntp_Work GetNumberOfHonorNodes  err": err.Error()}).Error("GetNumberOfHonorNodes")
@@ -178,35 +170,4 @@ func Ntp_Work(ctx context.Context) {
 
 		}
 	}
-}
-
-func generateProcessBlockNew(blockHeader, prevBlock *types.BlockHeader, trs [][]byte, classifyTxsMap map[int][]*transaction.Transaction) error {
-	blockBin, err := generateNextBlock(blockHeader, prevBlock, trs)
-	if err != nil {
-		return err
-	}
-	//err = block.InsertBlockWOForks(blockBin, true, false)
-	err = block.InsertBlockWOForksNew(blockBin, classifyTxsMap, true, false)
-	if err != nil {
-		log.WithError(err).Error("on inserting new block")
-		return err
-	}
-	log.WithFields(log.Fields{"block": blockHeader.String(), "type": consts.SyncProcess}).Debug("Generated block ID")
-	return nil
-}
-
-func GetRemoteGoodHosts() ([]string, error) {
-	if syspar.IsHonorNodeMode() {
-		return node.GetNodesBanService().FilterBannedHosts(syspar.GetRemoteHosts())
-	}
-	hosts := make([]string, 0)
-	candidateNodes, err := sqldb.GetCandidateNode(syspar.SysInt(syspar.NumberNodes))
-	if err != nil {
-		log.WithError(err).Error("getting candidate node list")
-		return nil, err
-	}
-	for _, node := range candidateNodes {
-		hosts = append(hosts, node.TcpAddress)
-	}
-	return hosts, nil
 }

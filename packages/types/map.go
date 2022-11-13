@@ -17,7 +17,7 @@ import (
 // Link represents a node of doubly linked list
 type Link struct {
 	key   string
-	value any
+	value interface{}
 	next  *Link
 	prev  *Link
 }
@@ -30,7 +30,7 @@ type Map struct {
 	tail *Link
 }
 
-func newLink(key string, value any) *Link {
+func newLink(key string, value interface{}) *Link {
 	return &Link{key: key, value: value, next: nil, prev: nil}
 }
 
@@ -39,9 +39,9 @@ func NewMap() *Map {
 	return &Map{m: make(map[string]*Link), head: nil, tail: nil}
 }
 
-func ConvertMap(in any) any {
+func ConvertMap(in interface{}) interface{} {
 	switch v := in.(type) {
-	case map[string]any:
+	case map[string]interface{}:
 		out := NewMap()
 		keys := make([]string, 0, len(v))
 		for key := range v {
@@ -49,18 +49,10 @@ func ConvertMap(in any) any {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			switch val := v[key].(type) {
-			case json.Number:
-				if n, err := val.Int64(); err == nil {
-					v[key] = n
-				} else if f, err := val.Float64(); err == nil {
-					v[key] = f
-				}
-			}
 			out.Set(key, ConvertMap(v[key]))
 		}
 		return out
-	case []any:
+	case []interface{}:
 		for i, item := range v {
 			v[i] = ConvertMap(item)
 		}
@@ -69,7 +61,7 @@ func ConvertMap(in any) any {
 }
 
 // LoadMap instantiates a linked hash map and initializing it from map[string]interface{}.
-func LoadMap(init map[string]any) (ret *Map) {
+func LoadMap(init map[string]interface{}) (ret *Map) {
 	ret = NewMap()
 	keys := make([]string, 0, len(init))
 	for key := range init {
@@ -83,7 +75,7 @@ func LoadMap(init map[string]any) (ret *Map) {
 }
 
 // Put inserts an element into the map.
-func (m *Map) Set(key string, value any) {
+func (m *Map) Set(key string, value interface{}) {
 	link, found := m.m[key]
 	if !found {
 		link = newLink(key, value)
@@ -103,7 +95,7 @@ func (m *Map) Set(key string, value any) {
 
 // Get searches the element in the map by key and returns its value or nil if key doesn't exists.
 // Second return parameter is true if key was found, otherwise false.
-func (m *Map) Get(key string) (value any, found bool) {
+func (m *Map) Get(key string) (value interface{}, found bool) {
 	var link *Link
 	link, found = m.m[key]
 	if found {
@@ -157,8 +149,8 @@ func (m *Map) Keys() []string {
 }
 
 // Values returns all values of the map (insertion order).
-func (m *Map) Values() []any {
-	values := make([]any, m.Size())
+func (m *Map) Values() []interface{} {
+	values := make([]interface{}, m.Size())
 	count := 0
 	for current := m.head; current != nil; current = current.next {
 		values[count] = current.value

@@ -7,9 +7,9 @@ import (
 type ErrorCode int
 
 type Error struct {
-	Code    ErrorCode      `json:"code"`
-	Message string         `json:"message"`
-	Data    map[string]any `json:"data,omitempty"`
+	Code    ErrorCode              `json:"code"`
+	Message string                 `json:"message"`
+	Data    map[string]interface{} `json:"data,omitempty"`
 }
 
 const (
@@ -30,7 +30,7 @@ func (e *Error) Error() string {
 	return e.Message
 }
 
-func NewError(code ErrorCode, message string, data ...map[string]any) *Error {
+func NewError(code ErrorCode, message string, data ...map[string]interface{}) *Error {
 	e := Error{
 		Code:    code,
 		Message: message,
@@ -50,44 +50,44 @@ func ParseError(message string) *Error {
 	}
 }
 
-func InvalidRequest(message string, data ...map[string]any) *Error {
+func InvalidRequest(message string, data ...map[string]interface{}) *Error {
 	return NewError(ErrCodeInvalidRequest, message, data...)
 }
 
-func MethodNotFound(request *Request, data ...map[string]any) *Error {
+func MethodNotFound(request *Request, data ...map[string]interface{}) *Error {
 	message := fmt.Sprintf("The method %s does not exist/is not available", request.Method)
 	return NewError(ErrCodeMethodNotFound, message, data...)
 }
 
-func InvalidParams(message string, data ...map[string]any) *Error {
+func InvalidParams(message string, data ...map[string]interface{}) *Error {
 	return NewError(ErrCodeInvalidParams, message, data...)
 }
 
-func InternalError(message string, data ...map[string]any) *Error {
+func InternalError(message string, data ...map[string]interface{}) *Error {
 	return NewError(ErrCodeInternalError, message, data...)
 }
 
-func InvalidInput(message string, data ...map[string]any) *Error {
+func InvalidInput(message string, data ...map[string]interface{}) *Error {
 	return NewError(ErrCodeInvalidInput, message, data...)
 }
 
-func ResourceNotFound(message string, data ...map[string]any) *Error {
+func ResourceNotFound(message string, data ...map[string]interface{}) *Error {
 	return NewError(ErrCodeResourceNotFound, message, data...)
 }
 
-func ResourceUnavailable(message string, data ...map[string]any) *Error {
+func ResourceUnavailable(message string, data ...map[string]interface{}) *Error {
 	return NewError(ErrCodeResourceUnavailable, message, data...)
 }
 
-func TransactionRejected(message string, data ...map[string]any) *Error {
+func TransactionRejected(message string, data ...map[string]interface{}) *Error {
 	return NewError(ErrCodeTransactionRejected, message, data...)
 }
 
-func MethodNotSupported(request *Request, data ...map[string]any) *Error {
+func MethodNotSupported(request *Request, data ...map[string]interface{}) *Error {
 	message := fmt.Sprintf("method not supported %s", request.Method)
 	return NewError(ErrCodeMethodNotSupported, message, data...)
 }
 
-func LimitExceeded(message string, data ...map[string]any) *Error {
+func LimitExceeded(message string, data ...map[string]interface{}) *Error {
 	return NewError(ErrCodeLimitExceeded, message, data...)
 }

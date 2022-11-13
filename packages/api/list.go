@@ -69,7 +69,7 @@ func checkAccess(tableName, columns string, client *Client) (table string, cols 
 	sc := smart.SmartContract{
 		CLB: conf.Config.IsSupportingCLB(),
 		VM:  script.GetVM(),
-		TxSmart: &types.SmartTransaction{
+		TxSmart: &types.SmartContract{
 			Header: &types.Header{
 				EcosystemID: client.EcosystemID,
 				KeyID:       client.KeyID,
@@ -167,7 +167,7 @@ func getListWhereHandler(w http.ResponseWriter, r *http.Request) {
 				errorResponse(w, errors.New(`Where has wrong format`))
 				return
 			}
-		case map[string]any:
+		case map[string]interface{}:
 			where, err = qb.GetWhere(types.LoadMap(v))
 			if err != nil {
 				errorResponse(w, err)
@@ -260,7 +260,7 @@ func getnodeListWhereHandler(w http.ResponseWriter, r *http.Request) {
 				errorResponse(w, errors.New(`Where has wrong format`))
 				return
 			}
-		case map[string]any:
+		case map[string]interface{}:
 			where, err = qb.GetWhere(types.LoadMap(v))
 			if err != nil {
 				errorResponse(w, err)
@@ -354,7 +354,7 @@ func getsumWhereHandler(w http.ResponseWriter, r *http.Request) {
 				errorResponse(w, errors.New(`Where has wrong format`))
 				return
 			}
-		case map[string]any:
+		case map[string]interface{}:
 			where, err = qb.GetWhere(types.LoadMap(v))
 			if err != nil {
 				errorResponse(w, err)
